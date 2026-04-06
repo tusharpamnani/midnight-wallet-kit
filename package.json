@@ -1,6 +1,6 @@
 {
   "name": "midnight-wallet-kit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Production-grade wallet adapter system for the Midnight Network",
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
