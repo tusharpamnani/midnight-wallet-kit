@@ -5,8 +5,6 @@ export type { ConnectionState, WalletAdapterEvents } from './core/types.js';
 // ─── Adapters ────────────────────────────────────────────────────────────────
 export { BaseWalletAdapter } from './adapters/base.js';
 export { InjectedWalletAdapter, type InjectedWalletAdapterOptions } from './adapters/injected.js';
-export { SeedWalletAdapter } from './adapters/seed.js';
-export { MockWalletAdapter, type MockWalletAdapterOptions } from './adapters/mock.js';
 
 // ─── Intent Builder ──────────────────────────────────────────────────────────
 export { IntentBuilder, type IntentParams } from './builder/intent.js';
@@ -38,6 +36,9 @@ export type {
   SignedIntent,
   MidnightWallet,
   Network,
+  UnsealedTransaction,
+  SealedTransaction,
+  SubmitTransactionResult,
 } from './validation/schemas.js';
 
 // ─── React Hooks ─────────────────────────────────────────────────────────────

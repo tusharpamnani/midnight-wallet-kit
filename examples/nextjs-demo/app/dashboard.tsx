@@ -45,8 +45,17 @@ const STATE_BADGE: Record<ConnectionState, { label: string; cls: string }> = {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 export default function Dashboard() {
-  const { wallet, address, connectionState, isConnected, error, manager } =
-    useWallet();
+  const { 
+    wallet, 
+    address, 
+    coinPublicKey, 
+    encryptionPublicKey, 
+    serviceUris, 
+    connectionState, 
+    isConnected, 
+    error, 
+    manager 
+  } = useWallet();
   const {
     connect,
     disconnect,
@@ -143,7 +152,7 @@ export default function Dashboard() {
   };
 
   /* ── Badge state ───────────────────────────────────────────────── */
-  const badge = STATE_BADGE[connectionState] ?? STATE_BADGE.idle;
+  const badge = STATE_BADGE[connectionState];
 
   return (
     <main className={styles.container}>
@@ -151,8 +160,8 @@ export default function Dashboard() {
       <header className={styles.hero}>
         <h1>Midnight Wallet Kit</h1>
         <p>
-          Production-grade wallet adapter system for the Midnight Network.
-          Connect, build intents, and sign — all with type-safe React hooks.
+          Official demo for the Midnight Wallet Kit.
+          Exclusively demonstrating 1AM and Lace wallet integrations.
         </p>
         <div className={styles.heroMeta}>
           <span className={`badge ${badge.cls}`}>
@@ -199,7 +208,19 @@ export default function Dashboard() {
             <div className={styles.infoRow}>
               <span className={styles.infoLabel}>Address</span>
               <span className={styles.infoValue}>
-                {address ?? "—"}
+                {address ? `${address.slice(0, 12)}...${address.slice(-8)}` : "—"}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Coin PK</span>
+              <span className={styles.infoValue}>
+                {coinPublicKey ? `${coinPublicKey.slice(0, 10)}...` : "—"}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Encryption PK</span>
+              <span className={styles.infoValue}>
+                {encryptionPublicKey ? `${encryptionPublicKey.slice(0, 10)}...` : "—"}
               </span>
             </div>
 
@@ -215,15 +236,22 @@ export default function Dashboard() {
                   Disconnect
                 </button>
               ) : (
-                <button
-                  className="btn btn-primary btn-lg"
-                  onClick={() => handleConnect("mock")}
-                  disabled={connectLoading}
-                  id="btn-connect-mock"
-                >
-                  {connectLoading && <span className="spinner" />}
-                  Connect Mock Wallet
-                </button>
+                <div className={styles.connectionActions}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleConnect("1AM Wallet")}
+                    disabled={connectLoading}
+                   >
+                    Connect 1AM
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => handleConnect("Lace Wallet")}
+                    disabled={connectLoading}
+                   >
+                    Connect Lace
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -249,7 +277,7 @@ export default function Dashboard() {
           </div>
 
           <div className={styles.adapterList}>
-            {adapters.map((adapter) => {
+            {adapters.map((adapter: { name: string }) => {
               const isActive =
                 wallet?.name.toLowerCase() === adapter.name.toLowerCase();
               return (
@@ -270,7 +298,6 @@ export default function Dashboard() {
                       className="btn btn-secondary btn-sm"
                       onClick={() => handleConnect(adapter.name)}
                       disabled={connectLoading}
-                      id={`btn-connect-${adapter.name.toLowerCase()}`}
                     >
                       Connect
                     </button>
@@ -278,6 +305,46 @@ export default function Dashboard() {
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        {/* ── Network Services Panel ───────────────────────────── */}
+        <section className={`glass-card ${styles.panel}`}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelIcon}>🌐</div>
+            <div>
+              <div className={styles.panelTitle}>Network Services</div>
+              <div className={styles.panelSubtitle}>
+                Connected node &amp; proof endpoints
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.networkInfo}>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Indexer</span>
+              <span className={styles.infoValue}>
+                {serviceUris?.indexerUri ?? "—"}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Prover</span>
+              <span className={styles.infoValue}>
+                {serviceUris?.proofServerUri ?? "—"}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Node</span>
+              <span className={styles.infoValue}>
+                {serviceUris?.nodeUri ?? "—"}
+              </span>
+            </div>
+            <div className={styles.infoRow}>
+              <span className={styles.infoLabel}>Network ID</span>
+              <span className={styles.infoValue}>
+                {serviceUris?.networkId ?? "—"}
+              </span>
+            </div>
           </div>
         </section>
 
@@ -492,15 +559,16 @@ export default function Dashboard() {
               color: "var(--text-secondary)",
             }}
           >
-            <code>{`import { WalletManager, MockWalletAdapter } from 'midnight-wallet-kit';
+            <code>{`import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
 import { WalletProvider, useWallet, useConnect, useIntent } from 'midnight-wallet-kit/react';
 
 // 1. Create manager + register adapters
 const manager = new WalletManager();
-manager.register(new MockWalletAdapter());
+manager.register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }));
+manager.register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
 
 // 2. Wrap your app
-<WalletProvider manager={manager} autoConnect={['mock']}>
+<WalletProvider manager={manager} autoConnect={['lace', 'midnight']}>
   <App />
 </WalletProvider>
 
@@ -508,13 +576,14 @@ manager.register(new MockWalletAdapter());
 function App() {
   const { wallet, address, isConnected } = useWallet();
   const { connect, disconnect, isLoading } = useConnect();
-  const { buildAndSign } = useIntent();
+  const { signIntent } = useIntent();
 
   const handleSign = async () => {
-    const signed = await buildAndSign({
+    const signed = await signIntent({
       contract: '0x742d…',
       action: 'transfer',
       params: { amount: 100 },
+      nonce: Date.now()
     });
     console.log('Signed:', signed);
   };
@@ -523,7 +592,7 @@ function App() {
     <div>
       {isConnected
         ? <button onClick={disconnect}>Disconnect {wallet.name}</button>
-        : <button onClick={() => connect('mock')}>Connect</button>
+        : <button onClick={() => connect('lace')}>Connect</button>
       }
       <p>Address: {address ?? '—'}</p>
       <button onClick={handleSign} disabled={!isConnected}>Sign Intent</button>

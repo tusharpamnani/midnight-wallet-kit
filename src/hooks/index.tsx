@@ -1,3 +1,4 @@
+'use client';
 import React, {
   createContext,
   useContext,
@@ -9,9 +10,40 @@ import React, {
 } from 'react';
 
 import type { WalletManager } from '../core/manager.js';
-import type { MidnightWallet, MidnightIntent, SignedIntent } from '../validation/schemas.js';
+import type {
+  MidnightWallet,
+  MidnightIntent,
+  SignedIntent,
+  ServiceUriConfig,
+} from '../validation/schemas.js';
 import { IntentBuilder, type IntentParams } from '../builder/intent.js';
 import type { ConnectionState } from '../core/types.js';
+
+/**
+ * State of the currently active wallet.
+ */
+export interface WalletState {
+  /** Map of registered adapters */
+  adapters: { name: string }[];
+  /** The currently connected wallet instance (if any) */
+  wallet: MidnightWallet | null;
+  /** Resolved address of the connected wallet */
+  address: string | null;
+  /** Public key for coins/UTXOs */
+  coinPublicKey: string | null;
+  /** Public key for payload encryption */
+  encryptionPublicKey: string | null;
+  /** Service URLs for interacting with the network */
+  serviceUris: ServiceUriConfig | null;
+  /** Current connection lifecycle state */
+  connectionState: ConnectionState;
+  /** True if a wallet is fully connected and ready */
+  isConnected: boolean;
+  /** Last connection or logic error */
+  error: Error | null;
+  /** Reference to the manager instance */
+  manager: WalletManager;
+}
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
@@ -19,6 +51,9 @@ interface WalletContextValue {
   manager: WalletManager;
   wallet: MidnightWallet | null;
   address: string | null;
+  coinPublicKey: string | null;
+  encryptionPublicKey: string | null;
+  serviceUris: ServiceUriConfig | null;
   connectionState: ConnectionState;
   error: Error | null;
   connect: (name: string) => Promise<void>;
@@ -45,19 +80,16 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
   const [wallet, setWallet] = useState<MidnightWallet | null>(manager.tryGetActiveWallet());
   const [connectionState, setConnectionState] = useState<ConnectionState>(manager.getConnectionState());
   const [error, setError] = useState<Error | null>(null);
-  const [address, setAddress] = useState<string | null>(() => {
-    try {
-      return manager.tryGetActiveWallet()?.getAddress() ?? null;
-    } catch {
-      return null;
-    }
-  });
+  const [address, setAddress] = useState<string | null>(null);
+  const [coinPublicKey, setCoinPublicKey] = useState<string | null>(null);
+  const [encryptionPublicKey, setEncryptionPublicKey] = useState<string | null>(null);
+  const [serviceUris, setServiceUris] = useState<ServiceUriConfig | null>(null);
 
   // Stable ref for the manager so event handlers don't re-register
   const managerRef = useRef(manager);
   managerRef.current = manager;
 
-  // Subscribe to manager events
+  // Sync state with manager events
   useEffect(() => {
     const mgr = managerRef.current;
 
@@ -66,14 +98,23 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
       setError(null);
       try {
         setAddress(w.getAddress());
+        setCoinPublicKey(w.getCoinPublicKey());
+        setEncryptionPublicKey(w.getEncryptionPublicKey());
+        setServiceUris(w.getServiceUris());
       } catch {
         setAddress(null);
+        setCoinPublicKey(null);
+        setEncryptionPublicKey(null);
+        setServiceUris(null);
       }
     };
 
     const handleDisconnect = () => {
       setWallet(null);
       setAddress(null);
+      setCoinPublicKey(null);
+      setEncryptionPublicKey(null);
+      setServiceUris(null);
     };
 
     const handleStateChange = (state: ConnectionState) => {
@@ -99,38 +140,41 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
   // Auto-connect on mount
   useEffect(() => {
-    if (autoConnect && autoConnect.length > 0 && !manager.isConnected()) {
-      void manager.connectWithFallback(autoConnect).catch((err) => {
+    if (autoConnect && autoConnect.length > 0 && !managerRef.current.isConnected()) {
+      void managerRef.current.connectWithFallback(autoConnect).catch((err) => {
         console.warn('[WalletProvider] Auto-connect failed:', err);
       });
     }
-  }, []); // intentionally empty — once on mount
+  }, [autoConnect]);
 
   const connect = useCallback(async (name: string) => {
     setError(null);
-    await manager.connect(name);
-  }, [manager]);
+    await managerRef.current.connect(name);
+  }, []);
 
   const disconnect = useCallback(async () => {
     setError(null);
-    await manager.disconnect();
-  }, [manager]);
+    await managerRef.current.disconnect();
+  }, []);
 
   const signIntent = useCallback(async (intent: MidnightIntent): Promise<SignedIntent> => {
-    const w = manager.getActiveWallet(); // throws if not connected
+    const w = managerRef.current.getActiveWallet();
     return w.signIntent(intent);
-  }, [manager]);
+  }, []);
 
   const value = useMemo<WalletContextValue>(() => ({
     manager,
     wallet,
     address,
+    coinPublicKey,
+    encryptionPublicKey,
+    serviceUris,
     connectionState,
     error,
     connect,
     disconnect,
     signIntent,
-  }), [manager, wallet, address, connectionState, error, connect, disconnect, signIntent]);
+  }), [manager, wallet, address, coinPublicKey, encryptionPublicKey, serviceUris, connectionState, error, connect, disconnect, signIntent]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 };
@@ -156,6 +200,9 @@ export function useWallet() {
   return {
     wallet: ctx.wallet,
     address: ctx.address,
+    coinPublicKey: ctx.coinPublicKey,
+    encryptionPublicKey: ctx.encryptionPublicKey,
+    serviceUris: ctx.serviceUris,
     connectionState: ctx.connectionState,
     isConnected: ctx.connectionState === 'connected' && ctx.wallet !== null,
     error: ctx.error,

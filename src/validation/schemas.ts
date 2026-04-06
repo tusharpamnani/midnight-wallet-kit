@@ -52,6 +52,22 @@ export type SealedTransaction = string | Record<string, unknown>;
 /** Result of submitting a transaction — typically a hash or ID string */
 export type SubmitTransactionResult = string;
 
+// ─── Service Configuration ───────────────────────────────────────────────────
+
+/** Configuration for interacting with Midnight Network services */
+export interface ServiceUriConfig {
+  /** URI for the proof server */
+  proofServerUri: string;
+  /** Primary indexer URI */
+  indexerUri: string;
+  /** Cardano node / substrate node URI */
+  nodeUri: string;
+  /** Optional websocket URI for indexer */
+  indexerWsUri?: string;
+  /** Optional network identifier for sanity checks */
+  networkId?: string;
+}
+
 // ─── MidnightWallet interface ────────────────────────────────────────────────
 
 /**
@@ -77,6 +93,15 @@ export interface MidnightWallet {
    * MUST throw WalletNotConnectedError if not connected.
    */
   getAddress(): string;
+
+  /** Returns the public key for coins/UTXOs. */
+  getCoinPublicKey(): string | null;
+
+  /** Returns the public key for payload encryption. */
+  getEncryptionPublicKey(): string | null;
+
+  /** Returns service URLs to interact with the network. */
+  getServiceUris(): ServiceUriConfig | null;
 
   /**
    * Sign a validated MidnightIntent.

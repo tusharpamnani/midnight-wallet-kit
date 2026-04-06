@@ -1,93 +1,266 @@
-# Midnight Wallet Integration Guide
+# Midnight Wallet Integration: Complete implementation Context
 
-This document provides complete context on how to connect and interact with a Midnight-compatible wallet (like Lace) in a real-world web application. Since Midnight is a privacy-first blockchain, wallet interaction differs from "standard" Ethereum or Cardano wallets.
+This document contains the full, production-ready code used in this project to handle Midnight wallet connections, state management, and transaction lifecycle.
 
-## 1. Prerequisites for Users
+## 1. Type Definitions (`ui/types/midnight-wallet.ts`)
 
-To use a Midnight application, a user typically needs:
-- **Lace Wallet Extension**: Installed in their browser.
-- **Midnight Network Enabled**: In Lace settings, the user must enable "Midnight" and select the `Preprod` or `Devnet` network.
-- **Testnet Tokens**: (tDUST) to pay for transaction fees and state execution.
+These types define the interface between the browser extension and the React application.
 
-## 2. Wallet Detection
+```typescript
+export interface ServiceUriConfig {
+  proofServerUri: string;
+  indexerUri: string;
+  nodeUri: string;
+}
 
-Midnight-compatible wallets inject themselves into the global `window` object. They typically appear in:
-1.  **`window.midnight`**: The primary namespace for Midnight-specific features.
-2.  **`window.cardano.lace`**: Often acts as a fallback for the Lace extension.
+export interface WalletState {
+  address: string;
+  coinPublicKey: string;
+  encryptionPublicKey: string;
+}
 
-### Detection & Injection Delay
-Wallet extensions can take a few moments to inject their APIs into the `window` object. It is recommended to use a polling mechanism to wait for the wallet.
+export interface WalletAPI {
+  state: () => Promise<WalletState>;
+  serviceUriConfig: () => Promise<ServiceUriConfig>;
+  // Fallback methods for older API versions
+  getUnshieldedAddress: () => Promise<string>;
+  getConfiguration: () => Promise<any>;
+  // Transaction methods
+  balanceUnsealedTransaction: (tx: any) => Promise<any>;
+  submitTransaction: (tx: any) => Promise<any>;
+  makeIntent?: (intent: any) => Promise<any>;
+  disconnect?: () => Promise<void>;
+}
 
-```javascript
-async function waitForWallets(timeout = 10000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const wallets = detectMidnightWallets();
-    if (wallets.length > 0) return wallets;
-    await new Promise((r) => setTimeout(r, 200));
+export interface MidnightLace {
+  enable: (network?: string) => Promise<WalletAPI>;
+  connect?: (network?: string) => Promise<WalletAPI>;
+}
+
+declare global {
+  interface Window {
+    midnight?: {
+      [key: string]: MidnightLace;
+    };
+    cardano?: {
+      lace?: MidnightLace;
+    };
   }
-  return [];
 }
 ```
 
-## 3. Connecting to the Wallet
+## 2. The Wallet Provider (`ui/providers/MidnightWalletProvider.tsx`)
 
-Connecting involves calling `.enable()` on the detected wallet object. Since network selection is important in Midnight, trying to enable the `preprod` network directly is standard.
+This context provider manages the persistent connection state and detection logic.
 
-```javascript
-async function connectToWallet(wallet) {
-  const connector = wallet.enable || wallet.connect;
-  
+```typescript
+'use client';
+
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { WalletAPI, ServiceUriConfig } from '../types/midnight-wallet';
+
+interface UseMidnightWalletState {
+  isConnected: boolean;
+  isLoading: boolean;
+  error: string | null;
+  address: string | null;
+  coinPublicKey: string | null;
+  encryptionPublicKey: string | null;
+  serviceUris: ServiceUriConfig | null;
+}
+
+const INITIAL_STATE: UseMidnightWalletState = {
+  isConnected: false,
+  isLoading: false,
+  error: null,
+  address: null,
+  coinPublicKey: null,
+  encryptionPublicKey: null,
+  serviceUris: null,
+};
+
+interface MidnightWalletContextType extends UseMidnightWalletState {
+  connectWallet: () => Promise<void>;
+  disconnectWallet: () => Promise<void>;
+  api: WalletAPI | null;
+}
+
+const MidnightWalletContext = createContext<MidnightWalletContextType | undefined>(undefined);
+
+export function MidnightWalletProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<UseMidnightWalletState>(INITIAL_STATE);
+  const apiRef = useRef<WalletAPI | null>(null);
+  const isConnectingRef = useRef(false);
+
+  // 1. Detect wallets in the window object
+  const detectWallets = useCallback(() => {
+    if (typeof window === 'undefined') return [];
+    const wallets: { id: string; wallet: any }[] = [];
+
+    // Check window.midnight namespace
+    if (window.midnight) {
+      Object.entries(window.midnight).forEach(([id, wallet]) => {
+        if (wallet && (wallet.enable || wallet.connect)) {
+          wallets.push({ id, wallet });
+        }
+      });
+    }
+
+    // Fallback for Lace in standard cardano namespace
+    if (window.cardano?.lace && !wallets.find(w => w.id === 'lace')) {
+      wallets.push({ id: 'lace', wallet: window.cardano.lace });
+    }
+
+    return wallets;
+  }, []);
+
+  // 2. Wait for injection (polling)
+  const waitForWallets = useCallback(async (timeout = 10000) => {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const wallets = detectWallets();
+      if (wallets.length > 0) return wallets;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return [];
+  }, [detectWallets]);
+
+  // 3. Secure connection method
+  const safeEnable = async (wallet: any) => {
+    const connector = wallet.enable || wallet.connect;
+    try {
+      // Try enabling specifically for preprod
+      return await connector.call(wallet, 'preprod');
+    } catch {
+      // General fallback
+      return await connector.call(wallet);
+    }
+  };
+
+  const connectWallet = useCallback(async () => {
+    if (isConnectingRef.current) return;
+    isConnectingRef.current = true;
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const wallets = await waitForWallets();
+      if (wallets.length === 0) throw new Error('No Midnight wallet detected.');
+
+      let connectedApi: WalletAPI | null = null;
+      for (const { id, wallet } of wallets) {
+        try {
+          const api = await safeEnable(wallet);
+          if (api) {
+            connectedApi = api;
+            break;
+          }
+        } catch (err) {
+          console.warn(`Wallet ${id} failed`, err);
+        }
+      }
+
+      if (!connectedApi) throw new Error('No compatible Midnight wallet found.');
+      apiRef.current = connectedApi;
+
+      // Determine if it's the standard API or alternative
+      if (typeof connectedApi.state === 'function') {
+        const [walletState, uris] = await Promise.all([
+          connectedApi.state(),
+          connectedApi.serviceUriConfig(),
+        ]);
+        setState({
+          isConnected: true,
+          isLoading: false,
+          error: null,
+          address: walletState.address,
+          coinPublicKey: walletState.coinPublicKey,
+          encryptionPublicKey: walletState.encryptionPublicKey,
+          serviceUris: uris,
+        });
+      } else {
+        // Alternative/Legacy API check
+        const address = await connectedApi.getUnshieldedAddress();
+        const config = await connectedApi.getConfiguration();
+        setState({
+          isConnected: true,
+          isLoading: false,
+          error: null,
+          address: typeof address === 'string' ? address : (address as any).address,
+          coinPublicKey: null,
+          encryptionPublicKey: null,
+          serviceUris: {
+            proofServerUri: config.proverServerUri,
+            indexerUri: config.indexerUri,
+            nodeUri: config.substrateNodeUri
+          },
+        });
+      }
+    } catch (err: any) {
+      setState((prev) => ({ ...prev, isLoading: false, error: err.message }));
+    } finally {
+      isConnectingRef.current = false;
+    }
+  }, [waitForWallets]);
+
+  const disconnectWallet = useCallback(async () => {
+    if (apiRef.current?.disconnect) await apiRef.current.disconnect();
+    apiRef.current = null;
+    setState(INITIAL_STATE);
+  }, []);
+
+  return (
+    <MidnightWalletContext.Provider value={{ ...state, connectWallet, disconnectWallet, api: state.isConnected ? apiRef.current : null }}>
+      {children}
+    </MidnightWalletContext.Provider>
+  );
+}
+
+export const useMidnightWallet = () => {
+  const context = useContext(MidnightWalletContext);
+  if (!context) throw new Error('useMidnightWallet must be used within MidnightWalletProvider');
+  return context;
+};
+```
+
+## 3. The Transaction Workflow (`ui/hooks/useLaunchpad.ts`)
+
+This illustrates how to use the wallet API to balance and submit transaction built by a proof server.
+
+```typescript
+const { api, isConnected } = useMidnightWallet();
+
+/**
+ * Takes a serialized UnsealedTransaction (from Midnight.js SDK),
+ * sends it to the wallet for coin-balancing, and submits it.
+ */
+const balanceAndSubmit = async (serializedUnsealedTx: string): Promise<string> => {
+  if (!api || !isConnected) throw new Error('Wallet not connected');
+
+  // 1. Prepare payload (SDK handles serialization differently across versions)
+  let txPayload: any;
   try {
-    // Try to enable and specify the network
-    return await connector.call(wallet, 'preprod');
-  } catch (err) {
-    // Fallback: Some versions may not accept arguments or use connect()
-    return await connector.call(wallet);
+    txPayload = JSON.parse(serializedUnsealedTx);
+  } catch {
+    txPayload = serializedUnsealedTx; // fallback to hex string
   }
-}
-```
 
-## 4. The Wallet API
+  // 2. Wallet balances (adds fees/UTXOs)
+  const balancedTx = await api.balanceUnsealedTransaction(txPayload);
 
-Once connected, the wallet returns an `api` object. The current ecosystem supports two patterns:
-
-### Pattern A: Modern Standard (Recommended)
-Used by the latest Midnight-ready Lace versions.
-- `api.state()`: Returns the user's addresses and public keys.
-- `api.serviceUriConfig()`: Returns the URIs for the proof server, indexer, and node that the wallet is configured to use.
-
-### Pattern B: Alternative/Development
-Found in some experimental or development builds.
-- `api.getUnshieldedAddress()`: Returns the main address.
-- `api.getConfiguration()`: Returns the service URIs under a configuration object.
-
-## 5. Executing Contract Calls (Proving & Balancing)
-
-In Midnight, the wallet extension **does not** execute smart contracts or generate ZK proofs directly. Instead, it "balances" transactions that have been proved elsewhere.
-
-The typical workflow is:
-1.  **Off-Chain Proving**: Your web app sends data to a "Proof Server" (usually running on the user's machine or a trusted server). This server generates the ZK proof and returns an **Unsealed Transaction**.
-2.  **Wallet Balancing**: Your app sends this Unsealed Transaction to the wallet via `api.balanceUnsealedTransaction(tx)`. The wallet adds coin inputs/outputs for fees and signs the transaction.
-3.  **Submission**: Your app sends the resulting **Sealed/Balanced Transaction** to the network via `api.submitTransaction(sealedTx)`.
-
-### Example: Contract Interaction logic
-```javascript
-async function handleAction(api, unsealedTx) {
-  // 1. Let the wallet balance the transaction
-  const balancedTx = await api.balanceUnsealedTransaction(unsealedTx);
-
-  // 2. Submit signed transaction to the network
+  // 3. Submit to network
   const result = await api.submitTransaction(balancedTx);
 
-  // result usually contains a txId or hash
-  return result.txId || result.hash || result;
-}
+  // 4. Extract TxID/Hash
+  return result.txId || result.hash || String(result);
+};
 ```
 
-## 6. Common Pitfalls
+## 4. Summary of Connection Lifecycle
 
-- **Network Mismatch**: Ensure the UI and the Wallet are both set to `preprod`.
-- **Proof Server Connectivity**: The browser must be able to reach the proof server (e.g., `http://localhost:6300`).
-- **Permissions**: If a user denies the connection, `enable()` will throw an error. Handle this gracefully.
-- **Async Latency**: ZK-proving can take several seconds to a minute. Always provide loading states to the user.
+1.  **Detection**: Polling `window.midnight` for 10 seconds.
+2.  **Authorization**: Calling `enable('preprod')` to get user permission.
+3.  **Synchronization**: Fetching `state()` and `serviceUriConfig()` to align frontend and wallet.
+4.  **Action**: Using `balanceUnsealedTransaction` to sign/balance ZK-proved transactions.
+5.  **Submission**: Broadcasting via `submitTransaction`.
+
+**Note on Proof Server**: For local development, ensure your proof server is running on `http://localhost:6300` and is accessible by the browser (CORS enabled).

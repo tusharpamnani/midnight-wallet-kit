@@ -12,96 +12,153 @@ import type {
   UnsealedTransaction,
   SealedTransaction,
   SubmitTransactionResult,
+  ServiceUriConfig,
 } from '../validation/schemas.js';
 
 /** Shape of the wallet API returned after .enable() */
 interface MidnightApi {
-  state?(): Promise<{ address: string }>;
-  getUnshieldedAddress?(): Promise<string>;
+  // Standard API
+  state?(): Promise<{ 
+    address: string;
+    coinPublicKey?: string;
+    encryptionPublicKey?: string;
+  }>;
+  serviceUriConfig?(): Promise<ServiceUriConfig>;
+  
+  // Alternative/Older API
+  getUnshieldedAddress?(): Promise<any>;
+  getConfiguration?(): Promise<any>;
+
+  // Common
   balanceUnsealedTransaction(tx: UnsealedTransaction): Promise<SealedTransaction>;
   submitTransaction(tx: SealedTransaction): Promise<SubmitTransactionResult>;
-  // For legacy/custom providers
   request?(args: { method: string; params?: unknown }): Promise<unknown>;
+  disconnect?(): Promise<void>;
 }
 
-/** Shape of the injected entry point (e.g. window.midnight) */
+/** Shape of the injected entry point */
 interface InjectedWallet {
   enable(network?: string): Promise<MidnightApi>;
   connect?(network?: string): Promise<MidnightApi>;
 }
 
 export interface InjectedWalletAdapterOptions {
-  /** Maximum retry attempts when waiting for the provider to appear (default: 5) */
+  /** Maximum retry attempts when waiting for the provider to appear (default: 10) */
   maxRetries?: number;
-  /** Milliseconds between retries (default: 400) */
+  /** Milliseconds between retries (default: 200) */
   retryDelayMs?: number;
-  /** Hard timeout for the entire connect() call in ms (default: 10_000) */
+  /** Hard timeout for the entire connect() call in ms (default: 15_000) */
   connectTimeoutMs?: number;
-  /** Primary property path on `window` to read the wallet from (default: 'midnight') */
+  /** Manual provider key if you want to skip generic discovery */
   providerKey?: string;
-  /** Fallback property path on `window` (default: 'cardano.lace') */
-  fallbackKey?: string;
+  /** Human-readable name (default: 'Injected') */
+  name?: string;
 }
 
 const DEFAULTS: Required<InjectedWalletAdapterOptions> = {
   maxRetries: 10,
   retryDelayMs: 200,
   connectTimeoutMs: 15_000,
-  providerKey: 'midnight',
-  fallbackKey: 'cardano.lace',
+  providerKey: '',
+  name: 'Injected',
 };
 
-/**
- * InjectedWalletAdapter
- *
- * Interacts with browser-extension-injected wallets like Lace.
- * Follows the Midnight-specific .enable() and .balance/submit workflow.
- */
 export class InjectedWalletAdapter extends BaseWalletAdapter {
-  public readonly name = 'Injected' as const;
-
+  public readonly name: string;
   private readonly opts: Required<InjectedWalletAdapterOptions>;
   private api: MidnightApi | null = null;
 
   constructor(options?: InjectedWalletAdapterOptions) {
     super();
     this.opts = { ...DEFAULTS, ...options };
+    this.name = this.opts.name;
   }
 
   // ── Discovery ──────────────────────────────────────────────────────────────
 
-  private getNestedProperty(obj: any, path: string): any {
-    return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+  private normalizeAddress(addr: any): string {
+    if (!addr) return '';
+    if (typeof addr === 'string') return addr;
+    if (typeof addr === 'object') {
+      return addr.unshieldedAddress || addr.address || addr.bech32 || JSON.stringify(addr);
+    }
+    return String(addr);
   }
 
-  private async waitForWallet(): Promise<InjectedWallet> {
-    if (typeof globalThis.window === 'undefined') {
-      throw new ProviderNotFoundError('window (not a browser environment)');
-    }
-
+  private detectWallets(): { id: string; wallet: InjectedWallet }[] {
+    if (typeof globalThis.window === 'undefined') return [];
+    
     const win = globalThis.window as any;
+    const wallets: { id: string; wallet: InjectedWallet }[] = [];
 
-    for (let attempt = 0; attempt <= this.opts.maxRetries; attempt++) {
-      // 1. Try primary (window.midnight)
-      let candidate = this.getNestedProperty(win, this.opts.providerKey);
-      
-      // 2. Try fallback (window.cardano.lace)
-      if (!candidate) {
-        candidate = this.getNestedProperty(win, this.opts.fallbackKey);
+    // TRAP: Lace Cardano can shadow Lace Midnight. 
+    // We must check window.midnight.* FIRST and exclusively for known Midnight IDs.
+    
+    // 1. Scan window.midnight.*
+    if (win.midnight && typeof win.midnight === 'object') {
+      // Direct check for 'lace' in case it's not enumerable
+      if (win.midnight.lace && (win.midnight.lace.enable || win.midnight.lace.connect)) {
+        if (!wallets.find(w => w.id === 'lace')) {
+          console.log(`[InjectedWalletAdapter] Found "lace" directly in window.midnight`);
+          wallets.push({ id: 'lace', wallet: win.midnight.lace });
+        }
       }
 
-      if (candidate && (candidate.enable || candidate.connect)) {
-        return candidate as InjectedWallet;
+      Object.entries(win.midnight).forEach(([id, wallet]: [string, any]) => {
+        if (wallet && (wallet.enable || wallet.connect)) {
+          // Standard discovery
+          if (!wallets.find(w => w.id === id)) {
+            console.log(`[InjectedWalletAdapter] Found Midnight provider in window.midnight: ${id}`);
+            wallets.push({ id, wallet });
+          }
+        }
+      });
+    }
+
+    // 2. Scan window.cardano.* for .midnight sub-properties
+    if (win.cardano && typeof win.cardano === 'object') {
+      Object.entries(win.cardano).forEach(([id, entry]: [string, any]) => {
+        if (entry?.midnight && (entry.midnight.enable || entry.midnight.connect)) {
+          if (!wallets.find(w => w.id === id)) {
+            console.log(`[InjectedWalletAdapter] Found Midnight sub-provider for "${id}" in window.cardano.${id}.midnight`);
+            wallets.push({ id, wallet: entry.midnight });
+          }
+        }
+      });
+    }
+
+    return wallets;
+  }
+
+  private async waitForFoundWallet(): Promise<{ id: string; wallet: InjectedWallet }> {
+    const targetId = this.opts.providerKey?.toLowerCase() || '';
+
+    for (let attempt = 0; attempt <= this.opts.maxRetries; attempt++) {
+      const wallets = this.detectWallets();
+      
+      if (targetId) {
+        // Try exact match vs normalized ID
+        const found = wallets.find(w => w.id.toLowerCase() === targetId);
+        if (found) return found;
+        
+        // Try fuzzy match (e.g. "lace" matches "be54f7ce...lace...") or if the wallet metadata matches
+        const fuzzy = wallets.find(w => 
+          w.id.toLowerCase().includes(targetId) || 
+          (w.wallet as any).name?.toLowerCase().includes(targetId) ||
+          (w.wallet as any).id?.toLowerCase().includes(targetId)
+        );
+        if (fuzzy) return fuzzy;
+      } else if (wallets.length > 0) {
+        return wallets[0]!;
       }
 
       if (attempt < this.opts.maxRetries) {
-        console.debug(`[Injected] Waiting for wallet, attempt ${attempt + 1}/${this.opts.maxRetries}...`);
         await new Promise((r) => setTimeout(r, this.opts.retryDelayMs));
       }
     }
 
     throw new ProviderNotFoundError(
-      `Wallet not found at window.${this.opts.providerKey} or window.${this.opts.fallbackKey}`,
+      this.opts.providerKey ? `Wallet "${this.opts.providerKey}"` : 'Any Midnight wallet',
       this.opts.maxRetries,
     );
   }
@@ -110,69 +167,99 @@ export class InjectedWalletAdapter extends BaseWalletAdapter {
 
   protected async onConnect(): Promise<void> {
     const timeoutController = new AbortController();
-    const timeout = setTimeout(() => timeoutController.abort(), this.opts.connectTimeoutMs);
+    const timeout = setTimeout(() => {
+      timeoutController.abort();
+    }, this.opts.connectTimeoutMs);
 
     try {
-      const wallet = await Promise.race([
-        this.waitForWallet(),
-        new Promise<never>((_, reject) => {
-          timeoutController.signal.addEventListener('abort', () =>
-            reject(new ConnectionTimeoutError(this.opts.connectTimeoutMs)),
-          );
-        }),
-      ]);
+      const walletEntry = await this.waitForFoundWallet();
+      const wallet = walletEntry.wallet;
+      const actualId = walletEntry.id;
 
-      // Connect via enable() or connect() fallback
       const connector = wallet.enable || wallet.connect;
-      if (!connector) throw new ConnectionRejectedError('Wallet has no enable/connect method.');
+      if (!connector) throw new ConnectionRejectedError(`Wallet "${actualId}" has no connection method.`);
 
+      // Try preprod first, then fallback
       try {
-        // As per guide, try connecting to 'preprod' network specifically
         this.api = await connector.call(wallet, 'preprod');
-      } catch {
-        // Fallback to simple connect if preprod argument is rejected
+      } catch (err) {
+        console.warn(`[InjectedWalletAdapter] Preprod connection failed for "${actualId}", trying default.`, err);
         this.api = await connector.call(wallet);
       }
 
-      if (!this.api) {
-        throw new ConnectionRejectedError('Wallet connection returned null API.');
-      }
+      if (!this.api) throw new ConnectionRejectedError(`Wallet "${actualId}" returned no API.`);
 
-      // Resolve address: check .state() then fallback to .getUnshieldedAddress()
+      console.log(`[InjectedWalletAdapter] Connected to "${actualId}", API keys:`, Object.keys(this.api));
+
       let address = '';
+      let coinPublicKey: string | null = null;
+      let encryptionPublicKey: string | null = null;
+      let serviceUris: ServiceUriConfig = {
+        proofServerUri: '',
+        indexerUri: '',
+        nodeUri: '',
+        networkId: '',
+      };
 
-      if (this.api.state) {
-        const state = await this.api.state();
+      // 1. Try Standard Standard API (state / serviceUriConfig)
+      if (typeof this.api.state === 'function') {
+        const [state, uris] = await Promise.all([
+          this.api.state(),
+          typeof this.api.serviceUriConfig === 'function' ? this.api.serviceUriConfig() : Promise.resolve(undefined),
+        ]);
+        
         address = state.address;
-      } else if (this.api.getUnshieldedAddress) {
-        address = await this.api.getUnshieldedAddress();
+        coinPublicKey = state.coinPublicKey ?? null;
+        encryptionPublicKey = state.encryptionPublicKey ?? null;
+        if (uris) serviceUris = uris;
+      } 
+      // 2. Try Older/Alternative API
+      else if (typeof (this.api as any).getUnshieldedAddress === 'function') {
+        const [rawAddr, config] = await Promise.all([
+          (this.api as any).getUnshieldedAddress(),
+          (this.api as any).getConfiguration ? (this.api as any).getConfiguration() : Promise.resolve({}),
+        ]);
+        
+        address = this.normalizeAddress(rawAddr);
+        serviceUris = {
+          proofServerUri: config.proofServerUri || config.proverServerUri || '',
+          indexerUri: config.indexerUri || config.indexServerUri || '',
+          nodeUri: config.nodeUri || config.nodeServerUri || '',
+          networkId: config.networkId || '',
+        };
+      } else {
+        throw new ConnectionRejectedError(`Wallet "${actualId}" has no recognized state or address methods.`);
       }
 
-      if (!address) {
-        throw new ConnectionRejectedError('Could not retrieve address from connected wallet state.');
-      }
+      this.setWalletDetails({
+        address,
+        coinPublicKey,
+        encryptionPublicKey,
+        serviceUris,
+      });
 
-      this.setAddress(address);
     } catch (err) {
       this.api = null;
-      throw wrapError(err, 'Failed to connect to injected wallet.');
+      throw wrapError(err, 'Failed to connect injected wallet.');
     } finally {
       clearTimeout(timeout);
     }
   }
 
   protected override async onDisconnect(): Promise<void> {
+    if (this.api?.disconnect) {
+      try {
+        await this.api.disconnect();
+      } catch (err) {
+        console.warn(`[InjectedWalletAdapter] Disconnect error:`, err);
+      }
+    }
     this.api = null;
   }
 
-  // ── Wallet Interface Implementations ───────────────────────────────────────
-
   async signIntent(intent: MidnightIntent): Promise<SignedIntent> {
-    if (!this.isConnected() || !this.api) {
-      throw new SigningError('Wallet not connected.');
-    }
+    if (!this.isConnected() || !this.api) throw new SigningError('Not connected.');
 
-    // Try request-based signing if available, or fallback to any signing method
     try {
       if (this.api.request) {
         const result = await this.api.request({
@@ -187,37 +274,28 @@ export class InjectedWalletAdapter extends BaseWalletAdapter {
           timestamp: Date.now(),
         };
       }
-      
-      // If the provider doesn't support signIntent directly, it's a protocol mismatch
-      throw new SigningError('Wallet does not support intent signing.');
+      throw new SigningError('Method signIntent not supported by provider.');
     } catch (err) {
-      throw wrapError(err, 'Intent signing failed.');
+      throw wrapError(err, 'Signing failed.');
     }
   }
 
   async balanceTransaction(unsealed: UnsealedTransaction): Promise<SealedTransaction> {
-    if (!this.isConnected() || !this.api) {
-      throw new Error('Wallet not connected.');
-    }
-
+    if (!this.isConnected() || !this.api) throw new Error('Not connected.');
     try {
       return await this.api.balanceUnsealedTransaction(unsealed);
     } catch (err) {
-      throw wrapError(err, 'Transaction balancing failed.');
+      throw wrapError(err, 'Balancing failed.');
     }
   }
 
   async submitTransaction(sealed: SealedTransaction): Promise<SubmitTransactionResult> {
-    if (!this.isConnected() || !this.api) {
-      throw new Error('Wallet not connected.');
-    }
-
+    if (!this.isConnected() || !this.api) throw new Error('Not connected.');
     try {
-      const result = await this.api.submitTransaction(sealed) as any;
-      // Extract hash/id as per guide
-      return result.txId || result.hash || result;
+      const res = await this.api.submitTransaction(sealed) as any;
+      return res.txId || res.hash || res;
     } catch (err) {
-      throw wrapError(err, 'Transaction submission failed.');
+      throw wrapError(err, 'Submission failed.');
     }
   }
 }

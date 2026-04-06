@@ -5,6 +5,7 @@ import type {
   UnsealedTransaction,
   SealedTransaction,
   SubmitTransactionResult,
+  ServiceUriConfig,
 } from '../validation/schemas.js';
 import { WalletNotConnectedError, WalletAlreadyConnectedError } from '../errors/wallet-errors.js';
 
@@ -21,6 +22,9 @@ export abstract class BaseWalletAdapter implements MidnightWallet {
   abstract readonly name: string;
 
   private _address: string | null = null;
+  private _coinPublicKey: string | null = null;
+  private _encryptionPublicKey: string | null = null;
+  private _serviceUris: ServiceUriConfig | null = null;
   private _connected = false;
   /** Guard against concurrent connect() race conditions */
   private _connectPromise: Promise<void> | null = null;
@@ -53,6 +57,9 @@ export abstract class BaseWalletAdapter implements MidnightWallet {
       await this.onDisconnect();
     } finally {
       this._address = null;
+      this._coinPublicKey = null;
+      this._encryptionPublicKey = null;
+      this._serviceUris = null;
       this._connected = false;
     }
   }
@@ -66,6 +73,18 @@ export abstract class BaseWalletAdapter implements MidnightWallet {
       throw new WalletNotConnectedError(this.name);
     }
     return this._address;
+  }
+
+  getCoinPublicKey(): string | null {
+    return this._coinPublicKey;
+  }
+
+  getEncryptionPublicKey(): string | null {
+    return this._encryptionPublicKey;
+  }
+
+  getServiceUris(): ServiceUriConfig | null {
+    return this._serviceUris;
   }
 
   abstract signIntent(intent: MidnightIntent): Promise<SignedIntent>;
@@ -85,6 +104,21 @@ export abstract class BaseWalletAdapter implements MidnightWallet {
       throw new Error(`[${this.name}] setAddress received invalid value: ${JSON.stringify(address)}`);
     }
     this._address = address;
+  }
+
+  /**
+   * Bulk update wallet details. Useful for setting keys and URIs during connection.
+   */
+  protected setWalletDetails(details: {
+    address: string;
+    coinPublicKey?: string | null;
+    encryptionPublicKey?: string | null;
+    serviceUris?: ServiceUriConfig | null;
+  }): void {
+    this.setAddress(details.address);
+    this._coinPublicKey = details.coinPublicKey ?? null;
+    this._encryptionPublicKey = details.encryptionPublicKey ?? null;
+    this._serviceUris = details.serviceUris ?? null;
   }
 
   /**
