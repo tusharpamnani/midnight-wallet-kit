@@ -1,4 +1,11 @@
-import type { MidnightWallet, MidnightIntent, SignedIntent } from '../validation/schemas.js';
+import type {
+  MidnightWallet,
+  MidnightIntent,
+  SignedIntent,
+  UnsealedTransaction,
+  SealedTransaction,
+  SubmitTransactionResult,
+} from '../validation/schemas.js';
 import { WalletNotConnectedError, WalletAlreadyConnectedError } from '../errors/wallet-errors.js';
 
 /**
@@ -62,6 +69,10 @@ export abstract class BaseWalletAdapter implements MidnightWallet {
   }
 
   abstract signIntent(intent: MidnightIntent): Promise<SignedIntent>;
+
+  abstract balanceTransaction(unsealed: UnsealedTransaction): Promise<SealedTransaction>;
+
+  abstract submitTransaction(sealed: SealedTransaction): Promise<SubmitTransactionResult>;
 
   // ── Protected API for subclasses ───────────────────────────────────────────
 

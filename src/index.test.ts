@@ -176,6 +176,23 @@ describe('MockWalletAdapter', () => {
     const intent = IntentBuilder.create({ contract: '0x1', action: 'x' });
     await expect(mock.signIntent(intent)).rejects.toThrow();
   });
+
+  it('balances a transaction', async () => {
+    const mock = new MockWalletAdapter({ balanceDelayMs: 10 });
+    await mock.connect();
+    const unsealed = { data: 'unsealed' };
+    const sealed = await mock.balanceTransaction(unsealed);
+    expect(sealed).toHaveProperty('balanced', true);
+    expect(sealed).toHaveProperty('unsealed', unsealed);
+  });
+
+  it('submits a transaction', async () => {
+    const mock = new MockWalletAdapter({ submitDelayMs: 10 });
+    await mock.connect();
+    const sealed = { data: 'sealed' };
+    const txHash = await mock.submitTransaction(sealed);
+    expect(txHash).toMatch(/^mock_tx_hash_/);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

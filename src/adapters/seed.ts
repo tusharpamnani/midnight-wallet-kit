@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
 import { BaseWalletAdapter } from './base.js';
 import { InvalidSeedError, SigningError, wrapError } from '../errors/wallet-errors.js';
-import type { MidnightIntent, SignedIntent } from '../validation/schemas.js';
+import type {
+  MidnightIntent,
+  SignedIntent,
+  UnsealedTransaction,
+  SealedTransaction,
+  SubmitTransactionResult,
+} from '../validation/schemas.js';
 
 /**
  * SeedWalletAdapter
@@ -120,5 +126,22 @@ export class SeedWalletAdapter extends BaseWalletAdapter {
     } catch (err) {
       throw new SigningError('Failed to sign intent with seed wallet.', err);
     }
+  }
+
+  async balanceTransaction(unsealed: UnsealedTransaction): Promise<SealedTransaction> {
+    if (!this.isConnected()) throw new Error('[Seed] Wallet not connected.');
+    // Seed wallet cannot balance real ZK transactions — must be done by a proof server
+    // returning a mock balanced tx
+    return {
+      unsealed,
+      balancedBy: 'seed-offline',
+      signature: createHash('sha256').update(this.seedPhrase).digest('hex'),
+    };
+  }
+
+  async submitTransaction(sealed: SealedTransaction): Promise<SubmitTransactionResult> {
+    if (!this.isConnected()) throw new Error('[Seed] Wallet not connected.');
+    // Return a deterministic hash based on the sealed tx
+    return createHash('sha256').update(JSON.stringify(sealed)).digest('hex');
   }
 }

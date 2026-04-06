@@ -2,17 +2,17 @@
   "name": "midnight-wallet-kit",
   "version": "1.0.0",
   "description": "Production-grade wallet adapter system for the Midnight Network",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
     },
     "./react": {
-      "types": "./dist/hooks/index.d.ts",
-      "import": "./dist/hooks/index.js"
+      "types": "./dist/src/hooks/index.d.ts",
+      "import": "./dist/src/hooks/index.js"
     }
   },
   "files": [

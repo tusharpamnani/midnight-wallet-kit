@@ -41,6 +41,17 @@ export const SignedIntentSchema = z.object({
 
 export type SignedIntent = z.infer<typeof SignedIntentSchema>;
 
+// ─── Transactions ────────────────────────────────────────────────────────────
+
+/** Hex string or encoded object representation of a ZK transaction (unsealed) */
+export type UnsealedTransaction = string | Record<string, unknown>;
+
+/** Result of a balanced transaction — includes proofs and signatures */
+export type SealedTransaction = string | Record<string, unknown>;
+
+/** Result of submitting a transaction — typically a hash or ID string */
+export type SubmitTransactionResult = string;
+
 // ─── MidnightWallet interface ────────────────────────────────────────────────
 
 /**
@@ -72,4 +83,17 @@ export interface MidnightWallet {
    * MUST throw SigningError on failure — never returns undefined.
    */
   signIntent(intent: MidnightIntent): Promise<SignedIntent>;
+
+  /**
+   * Balances an unsealed transaction by adding coin inputs/outputs for fees
+   * and providing necessary signatures.
+   * MUST throw if not connected or balancing fails.
+   */
+  balanceTransaction(unsealed: UnsealedTransaction): Promise<SealedTransaction>;
+
+  /**
+   * Submits a balanced (sealed) transaction to the Midnight Network.
+   * MUST throw if not connected or submission fails.
+   */
+  submitTransaction(sealed: SealedTransaction): Promise<SubmitTransactionResult>;
 }
