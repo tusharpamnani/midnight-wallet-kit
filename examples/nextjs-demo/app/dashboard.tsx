@@ -152,6 +152,60 @@ export default function Dashboard() {
     }
   };
 
+  /* ── Quick Start Code ─────────────────────────────────────────── */
+  const QUICK_START_CODE = `import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
+import { WalletProvider, useWallet, useConnect, useIntent } from 'midnight-wallet-kit/react';
+
+// 1. Create manager + register adapters
+const manager = new WalletManager();
+manager.register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }));
+manager.register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
+
+// 2. Wrap your app
+<WalletProvider manager={manager} autoConnect={['lace', 'midnight']}>
+  <App />
+</WalletProvider>
+
+// 3. Use hooks in any component
+function App() {
+  const { wallet, address, isConnected } = useWallet();
+  const { connect, disconnect, isLoading } = useConnect();
+  const { buildAndSign } = useIntent();
+
+  const handleSign = async () => {
+    // buildAndSign combines IntentBuilder.create + signIntent in one step
+    const signed = await buildAndSign({
+      contract: '0x742d…',
+      action: 'transfer',
+      params: { amount: 100 }
+    });
+    console.log('Signed:', signed);
+  };
+
+  return (
+    <div>
+      {isConnected
+        ? <button onClick={disconnect}>Disconnect {wallet.name}</button>
+        : <button onClick={() => connect('lace')}>Connect</button>
+      }
+      <p>Address: {address ?? '—'}</p>
+      <button onClick={handleSign} disabled={!isConnected}>Sign Intent</button>
+    </div>
+  );
+}`;
+
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(QUICK_START_CODE);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      pushEvent("connect", "Code snippet copied to clipboard");
+    } catch (err) {
+      console.error("Failed to copy!", err);
+    }
+  };
+
   /* ── Badge state ───────────────────────────────────────────────── */
   const badge = STATE_BADGE[connectionState];
 
@@ -162,7 +216,8 @@ export default function Dashboard() {
         <h1>Midnight Wallet Kit</h1>
         <p>
           Official demo for the Midnight Wallet Kit.
-          Exclusively demonstrating 1AM and Lace wallet integrations.
+          Experience the future of zero-knowledge privacy with a premium, 
+          hardened wallet integration.
         </p>
         <div className={styles.heroMeta}>
           <span className={`badge ${badge.cls}`}>
@@ -172,19 +227,21 @@ export default function Dashboard() {
                 height: 6,
                 borderRadius: "50%",
                 background: "currentColor",
+                boxShadow: `0 0 10px currentColor`,
               }}
             />
             {badge.label}
           </span>
-          <span className="badge badge-neutral">Next.js + React</span>
-          <span className="badge badge-neutral">TypeScript</span>
+          <span className="badge badge-neutral">Next.js 15</span>
+          <span className="badge badge-neutral">TypeScript 5</span>
+          <span className="badge badge-neutral">Midnight v0.1</span>
         </div>
       </header>
 
       {/* ── Grid ──────────────────────────────────────────────────── */}
       <div className={`${styles.grid} stagger`}>
         {/* ── Connection Panel ─────────────────────────────────── */}
-        <section className={`glass-card ${styles.panel}`}>
+        <section className={`glass-card ${styles.panel} ${styles.mainPanel}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>⚡</div>
             <div>
@@ -266,7 +323,7 @@ export default function Dashboard() {
         </section>
 
         {/* ── Adapters Panel ───────────────────────────────────── */}
-        <section className={`glass-card ${styles.panel}`}>
+        <section className={`glass-card ${styles.panel} ${styles.sidePanel}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>🔌</div>
             <div>
@@ -309,7 +366,7 @@ export default function Dashboard() {
         </section>
 
         {/* ── Network Services Panel ───────────────────────────── */}
-        <section className={`glass-card ${styles.panel}`}>
+        <section className={`glass-card ${styles.panel} ${styles.sidePanel}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>🌐</div>
             <div>
@@ -349,7 +406,7 @@ export default function Dashboard() {
         </section>
 
         {/* ── Intent Builder Panel ─────────────────────────────── */}
-        <section className={`glass-card ${styles.panel}`}>
+        <section className={`glass-card ${styles.panel} ${styles.mainPanel}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>📝</div>
             <div>
@@ -481,7 +538,7 @@ export default function Dashboard() {
         </section>
 
         {/* ── Event Log Panel ──────────────────────────────────── */}
-        <section className={`glass-card ${styles.panel}`}>
+        <section className={`glass-card ${styles.panel} ${styles.fullWidth}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>📡</div>
             <div>
@@ -510,24 +567,26 @@ export default function Dashboard() {
             ) : (
               events.map((evt) => (
                 <div key={evt.id} className={styles.eventItem}>
-                  <span className={styles.eventTime}>{evt.time}</span>
-                  <div className={styles.eventContent}>
-                    <div
-                      className={`${styles.eventType} ${evt.kind === "connect"
-                        ? styles.eventTypeConnect
-                        : evt.kind === "disconnect"
-                          ? styles.eventTypeDisconnect
-                          : evt.kind === "state"
-                            ? styles.eventTypeState
-                            : evt.kind === "error"
-                              ? styles.eventTypeError
-                              : styles.eventTypeSign
-                        }`}
-                    >
-                      {evt.kind}
+                  <div className={styles.eventHeader}>
+                    <div className={styles.eventMeta}>
+                      <div
+                        className={`${styles.eventType} ${evt.kind === "connect"
+                          ? styles.eventTypeConnect
+                          : evt.kind === "disconnect"
+                            ? styles.eventTypeDisconnect
+                            : evt.kind === "state"
+                              ? styles.eventTypeState
+                              : evt.kind === "error"
+                                ? styles.eventTypeError
+                                : styles.eventTypeSign
+                          }`}
+                      >
+                        {evt.kind}
+                      </div>
+                      <span className={styles.eventTime}>{evt.time}</span>
                     </div>
-                    <div className={styles.eventMessage}>{evt.message}</div>
                   </div>
+                  <div className={styles.eventMessage}>{evt.message}</div>
                 </div>
               ))
             )}
@@ -535,15 +594,31 @@ export default function Dashboard() {
         </section>
 
         {/* ── Code Snippet Panel ───────────────────────────────── */}
-        <section className={`glass-card ${styles.panel} ${styles.fullWidth}`}>
+        <section className={`glass-card ${styles.panel} ${styles.fullWidth} ${styles.codePanel}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelIcon}>{"</>"}</div>
             <div>
               <div className={styles.panelTitle}>Quick Start</div>
               <div className={styles.panelSubtitle}>
-                Copy this into your Next.js app
+                The core boilerplate for your dApp. This initializes the <code>WalletManager</code>, 
+                registers 1AM/Lace adapters, and provides the global <code>WalletProvider</code> context.
               </div>
             </div>
+            <button
+              className={`btn ${copied ? 'btn-success' : 'btn-secondary'} btn-sm`}
+              style={{ marginLeft: "auto" }}
+              onClick={handleCopy}
+            >
+              {copied ? (
+                <>
+                  <span>✓</span> Copied
+                </>
+              ) : (
+                <>
+                  <span>📋</span> Copy Code
+                </>
+              )}
+            </button>
           </div>
 
           <pre
@@ -556,48 +631,12 @@ export default function Dashboard() {
               fontSize: "0.8125rem",
               lineHeight: 1.65,
               color: "var(--text-secondary)",
+              position: "relative",
             }}
           >
-            <code>{`import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
-import { WalletProvider, useWallet, useConnect, useIntent } from 'midnight-wallet-kit/react';
-
-// 1. Create manager + register adapters
-const manager = new WalletManager();
-manager.register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }));
-manager.register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
-
-// 2. Wrap your app
-<WalletProvider manager={manager} autoConnect={['lace', 'midnight']}>
-  <App />
-</WalletProvider>
-
-// 3. Use hooks in any component
-function App() {
-  const { wallet, address, isConnected } = useWallet();
-  const { connect, disconnect, isLoading } = useConnect();
-  const { buildAndSign } = useIntent();
-
-  const handleSign = async () => {
-    // buildAndSign combines IntentBuilder.create + signIntent in one step
-    const signed = await buildAndSign({
-      contract: '0x742d…',
-      action: 'transfer',
-      params: { amount: 100 }
-    });
-    console.log('Signed:', signed);
-  };
-
-  return (
-    <div>
-      {isConnected
-        ? <button onClick={disconnect}>Disconnect {wallet.name}</button>
-        : <button onClick={() => connect('lace')}>Connect</button>
-      }
-      <p>Address: {address ?? '—'}</p>
-      <button onClick={handleSign} disabled={!isConnected}>Sign Intent</button>
-    </div>
-  );
-}`}</code>
+            <code style={{ fontFamily: "var(--font-mono)" }}>
+              {QUICK_START_CODE}
+            </code>
           </pre>
         </section>
       </div>

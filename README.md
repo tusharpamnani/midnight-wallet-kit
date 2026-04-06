@@ -119,4 +119,4 @@ const adapter = new MockWalletAdapter({
 For a complete breakdown of every interface, error code, and adapter configuration, please see the **[Technical Documentation](./DOCS.md)**.
 
 ---
-MIT © 2026 Midnight Network
+MIT © 2026 Tushar Pamnani

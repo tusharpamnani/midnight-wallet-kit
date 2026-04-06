@@ -38,7 +38,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <WalletProvider manager={manager} autoConnect={autoConnect}>
-      {children}
+      {children as any}
     </WalletProvider>
   );
 }

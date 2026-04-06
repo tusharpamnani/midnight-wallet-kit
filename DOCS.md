@@ -124,4 +124,4 @@ Every error from the kit is an instance of a typed error class inheriting from `
 | `NETWORK_MISMATCH` | `NetworkMismatchError` | Wallet switched networks during an active session. |
 
 ---
-MIT © 2026 Midnight Network
+MIT © 2026 Tushar Pamnani

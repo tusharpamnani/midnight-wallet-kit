@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Midnight Wallet Kit — Next.js Demo",
+  title: "Midnight Wallet Kit",
   description:
-    "Production-grade wallet adapter demo for the Midnight Network. Connect wallets, build intents, sign transactions — all with type-safe React hooks.",
+    "Production-grade wallet integration for the Midnight Network. Resilient signing. ZK-native. First-class React support.",
 };
 
 export default function RootLayout({
@@ -24,8 +24,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} scroll-smooth`}>
+      <body className="bg-background text-text-primary antialiased">
+        <div className="fixed inset-0 bg-noise opacity-[0.03] pointer-events-none z-[9999]" />
+        {children}
+      </body>
     </html>
   );
 }
