@@ -11,18 +11,21 @@ export type Network = z.infer<typeof NetworkSchema>;
  * Schema for a contract intent on the Midnight Network.
  * `.strict()` rejects any unknown keys at parse-time.
  */
-export const MidnightIntentSchema = z.object({
-  /** Deployed contract address / identifier */
-  contract: z.string().min(1, 'Contract address must not be empty'),
-  /** The contract action to invoke (e.g. "mint", "transfer") */
-  action: z.string().min(1, 'Action name must not be empty'),
-  /** Arbitrary key-value parameters for the action */
-  params: z.record(z.string(), z.unknown()).default({}),
-  /** Monotonically increasing nonce to prevent replays */
-  nonce: z.number().int().nonnegative(),
-  /** Target network */
-  network: NetworkSchema.default('preprod'),
-}).strict();
+export const MidnightIntentSchema = z.union([
+  z.object({
+    /** Deployed contract address / identifier */
+    contract: z.string().min(1, 'Contract address must not be empty'),
+    /** The contract action to invoke (e.g. "mint", "transfer") */
+    action: z.string().min(1, 'Action name must not be empty'),
+    /** Arbitrary key-value parameters for the action */
+    params: z.record(z.string(), z.unknown()).default({}),
+    /** Monotonically increasing nonce to prevent replays */
+    nonce: z.number().int().nonnegative(),
+    /** Target network */
+    network: NetworkSchema.default('preprod'),
+  }).strict(),
+  z.string()
+]);
 
 export type MidnightIntent = z.infer<typeof MidnightIntentSchema>;
 

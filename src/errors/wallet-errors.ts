@@ -141,6 +141,63 @@ export class InvalidSeedError extends MidnightWalletError {
   }
 }
 
+export class SessionExpiredError extends MidnightWalletError {
+  constructor(walletName: string) {
+    super(
+      `Session for wallet "${walletName}" has expired or been revoked.`,
+      'SESSION_EXPIRED',
+      { walletName },
+    );
+    this.name = 'SessionExpiredError';
+  }
+}
+
+export class UnsupportedMethodError extends MidnightWalletError {
+  constructor(method: string, mode: string) {
+    super(
+      `Method "${method}" is not supported in current wallet mode: ${mode}.`,
+      'UNSUPPORTED_METHOD',
+      { method, mode },
+    );
+    this.name = 'UnsupportedMethodError';
+  }
+}
+
+export class BalanceFetchError extends MidnightWalletError {
+  constructor(address: string, cause?: unknown) {
+    super(
+      `Failed to fetch balance for address: ${address}`,
+      'BALANCE_FETCH_FAILED',
+      { address },
+      cause,
+    );
+    this.name = 'BalanceFetchError';
+  }
+}
+
+export class MessageSigningError extends MidnightWalletError {
+  constructor(message: string, cause?: unknown) {
+    super(
+      'Failed to sign message.',
+      'MESSAGE_SIGNING_FAILED',
+      { messageLength: message.length },
+      cause,
+    );
+    this.name = 'MessageSigningError';
+  }
+}
+
+export class NetworkMismatchError extends MidnightWalletError {
+  constructor(current: string, expected: string) {
+    super(
+      `Network mismatch: Wallet shifted from ${expected} to ${current}.`,
+      'NETWORK_MISMATCH',
+      { current, expected },
+    );
+    this.name = 'NetworkMismatchError';
+  }
+}
+
 /**
  * Wraps an unknown thrown value into a MidnightWalletError,
  * preserving the original cause. Use at adapter/boundary layers

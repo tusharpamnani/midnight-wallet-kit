@@ -38,6 +38,7 @@ const STATE_BADGE: Record<ConnectionState, { label: string; cls: string }> = {
   disconnecting: { label: "Disconnecting…", cls: "badge-warning" },
   disconnected: { label: "Disconnected", cls: "badge-neutral" },
   error: { label: "Error", cls: "badge-error" },
+  restoring: { label: "Restoring…", cls: "badge-warning" },
 };
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -45,16 +46,16 @@ const STATE_BADGE: Record<ConnectionState, { label: string; cls: string }> = {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 export default function Dashboard() {
-  const { 
-    wallet, 
-    address, 
-    coinPublicKey, 
-    encryptionPublicKey, 
-    serviceUris, 
-    connectionState, 
-    isConnected, 
-    error, 
-    manager 
+  const {
+    wallet,
+    address,
+    coinPublicKey,
+    encryptionPublicKey,
+    serviceUris,
+    connectionState,
+    isConnected,
+    error,
+    manager
   } = useWallet();
   const {
     connect,
@@ -105,7 +106,7 @@ export default function Dashboard() {
 
   /* ── Intent form state ─────────────────────────────────────────── */
   const [contract, setContract] = useState(
-    "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD"
+    "0xe5ef84eb9e72532120f5530a13257b8d16ed9726333aa1af767dfbf2091e5fb0"
   );
   const [action, setAction] = useState("transfer");
   const [paramKey, setParamKey] = useState("amount");
@@ -241,14 +242,14 @@ export default function Dashboard() {
                     className="btn btn-primary"
                     onClick={() => handleConnect("1AM Wallet")}
                     disabled={connectLoading}
-                   >
+                  >
                     Connect 1AM
                   </button>
                   <button
                     className="btn btn-secondary"
                     onClick={() => handleConnect("Lace Wallet")}
                     disabled={connectLoading}
-                   >
+                  >
                     Connect Lace
                   </button>
                 </div>
@@ -284,9 +285,8 @@ export default function Dashboard() {
                 <div key={adapter.name} className={styles.adapterItem}>
                   <div className={styles.adapterName}>
                     <span
-                      className={`${styles.adapterDot} ${
-                        isActive ? styles.adapterDotActive : ""
-                      }`}
+                      className={`${styles.adapterDot} ${isActive ? styles.adapterDotActive : ""
+                        }`}
                     />
                     <span style={{ fontWeight: 600 }}>{adapter.name}</span>
                     {isActive && (
@@ -513,17 +513,16 @@ export default function Dashboard() {
                   <span className={styles.eventTime}>{evt.time}</span>
                   <div className={styles.eventContent}>
                     <div
-                      className={`${styles.eventType} ${
-                        evt.kind === "connect"
-                          ? styles.eventTypeConnect
-                          : evt.kind === "disconnect"
+                      className={`${styles.eventType} ${evt.kind === "connect"
+                        ? styles.eventTypeConnect
+                        : evt.kind === "disconnect"
                           ? styles.eventTypeDisconnect
                           : evt.kind === "state"
-                          ? styles.eventTypeState
-                          : evt.kind === "error"
-                          ? styles.eventTypeError
-                          : styles.eventTypeSign
-                      }`}
+                            ? styles.eventTypeState
+                            : evt.kind === "error"
+                              ? styles.eventTypeError
+                              : styles.eventTypeSign
+                        }`}
                     >
                       {evt.kind}
                     </div>
@@ -576,14 +575,14 @@ manager.register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight
 function App() {
   const { wallet, address, isConnected } = useWallet();
   const { connect, disconnect, isLoading } = useConnect();
-  const { signIntent } = useIntent();
+  const { buildAndSign } = useIntent();
 
   const handleSign = async () => {
-    const signed = await signIntent({
+    // buildAndSign combines IntentBuilder.create + signIntent in one step
+    const signed = await buildAndSign({
       contract: '0x742d…',
       action: 'transfer',
-      params: { amount: 100 },
-      nonce: Date.now()
+      params: { amount: 100 }
     });
     console.log('Signed:', signed);
   };

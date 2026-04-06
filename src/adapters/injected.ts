@@ -4,6 +4,7 @@ import {
   ConnectionRejectedError,
   ConnectionTimeoutError,
   SigningError,
+  SessionExpiredError,
   wrapError,
 } from '../errors/wallet-errors.js';
 import type {
@@ -14,17 +15,18 @@ import type {
   SubmitTransactionResult,
   ServiceUriConfig,
 } from '../validation/schemas.js';
+import { isBrowser } from '../utils/env.js';
 
 /** Shape of the wallet API returned after .enable() */
 interface MidnightApi {
   // Standard API
-  state?(): Promise<{ 
+  state?(): Promise<{
     address: string;
     coinPublicKey?: string;
     encryptionPublicKey?: string;
   }>;
   serviceUriConfig?(): Promise<ServiceUriConfig>;
-  
+
   // Alternative/Older API
   getUnshieldedAddress?(): Promise<any>;
   getConfiguration?(): Promise<any>;
@@ -36,7 +38,10 @@ interface MidnightApi {
   disconnect?(): Promise<void>;
 }
 
-/** Shape of the injected entry point */
+/** Specific classification of wallet's functional capabilities */
+export type WalletMode = 'intent-signing' | 'tx-only' | 'unknown';
+
+/** Shape of the injected entry point in window.midnight */
 interface InjectedWallet {
   enable(network?: string): Promise<MidnightApi>;
   connect?(network?: string): Promise<MidnightApi>;
@@ -63,10 +68,16 @@ const DEFAULTS: Required<InjectedWalletAdapterOptions> = {
   name: 'Injected',
 };
 
+/**
+ * Production-grade adapter for injected Midnight wallets (Lace, 1AM, etc.).
+ * Implements capability detection and resilient signing logic.
+ * SSR-safe: returns empty discovery on server.
+ */
 export class InjectedWalletAdapter extends BaseWalletAdapter {
   public readonly name: string;
   private readonly opts: Required<InjectedWalletAdapterOptions>;
   private api: MidnightApi | null = null;
+  private mode: WalletMode = 'unknown';
 
   constructor(options?: InjectedWalletAdapterOptions) {
     super();
@@ -74,7 +85,7 @@ export class InjectedWalletAdapter extends BaseWalletAdapter {
     this.name = this.opts.name;
   }
 
-  // ── Discovery ──────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private normalizeAddress(addr: any): string {
     if (!addr) return '';
@@ -85,44 +96,39 @@ export class InjectedWalletAdapter extends BaseWalletAdapter {
     return String(addr);
   }
 
+  private async safeRequest(method: string, params: any): Promise<any | null> {
+    if (!this.api?.request) return null;
+
+    try {
+      return await this.api.request({ method, params });
+    } catch (err: any) {
+      const msg = (err?.message || String(err)).toLowerCase();
+      if (msg.includes('not implemented')) return null;
+      throw err;
+    }
+  }
+
   private detectWallets(): { id: string; wallet: InjectedWallet }[] {
-    if (typeof globalThis.window === 'undefined') return [];
-    
+    if (!isBrowser) return [];
+
     const win = globalThis.window as any;
     const wallets: { id: string; wallet: InjectedWallet }[] = [];
 
-    // TRAP: Lace Cardano can shadow Lace Midnight. 
-    // We must check window.midnight.* FIRST and exclusively for known Midnight IDs.
-    
-    // 1. Scan window.midnight.*
     if (win.midnight && typeof win.midnight === 'object') {
-      // Direct check for 'lace' in case it's not enumerable
       if (win.midnight.lace && (win.midnight.lace.enable || win.midnight.lace.connect)) {
-        if (!wallets.find(w => w.id === 'lace')) {
-          console.log(`[InjectedWalletAdapter] Found "lace" directly in window.midnight`);
-          wallets.push({ id: 'lace', wallet: win.midnight.lace });
-        }
+        wallets.push({ id: 'lace', wallet: win.midnight.lace });
       }
-
       Object.entries(win.midnight).forEach(([id, wallet]: [string, any]) => {
-        if (wallet && (wallet.enable || wallet.connect)) {
-          // Standard discovery
-          if (!wallets.find(w => w.id === id)) {
-            console.log(`[InjectedWalletAdapter] Found Midnight provider in window.midnight: ${id}`);
-            wallets.push({ id, wallet });
-          }
+        if (wallet && (wallet.enable || wallet.connect) && !wallets.find(w => w.id === id)) {
+          wallets.push({ id, wallet });
         }
       });
     }
 
-    // 2. Scan window.cardano.* for .midnight sub-properties
     if (win.cardano && typeof win.cardano === 'object') {
       Object.entries(win.cardano).forEach(([id, entry]: [string, any]) => {
-        if (entry?.midnight && (entry.midnight.enable || entry.midnight.connect)) {
-          if (!wallets.find(w => w.id === id)) {
-            console.log(`[InjectedWalletAdapter] Found Midnight sub-provider for "${id}" in window.cardano.${id}.midnight`);
-            wallets.push({ id, wallet: entry.midnight });
-          }
+        if (entry?.midnight && (entry.midnight.enable || entry.midnight.connect) && !wallets.find(w => w.id === id)) {
+          wallets.push({ id, wallet: entry.midnight });
         }
       });
     }
@@ -132,170 +138,174 @@ export class InjectedWalletAdapter extends BaseWalletAdapter {
 
   private async waitForFoundWallet(): Promise<{ id: string; wallet: InjectedWallet }> {
     const targetId = this.opts.providerKey?.toLowerCase() || '';
-
     for (let attempt = 0; attempt <= this.opts.maxRetries; attempt++) {
       const wallets = this.detectWallets();
-      
-      if (targetId) {
-        // Try exact match vs normalized ID
-        const found = wallets.find(w => w.id.toLowerCase() === targetId);
-        if (found) return found;
-        
-        // Try fuzzy match (e.g. "lace" matches "be54f7ce...lace...") or if the wallet metadata matches
-        const fuzzy = wallets.find(w => 
-          w.id.toLowerCase().includes(targetId) || 
-          (w.wallet as any).name?.toLowerCase().includes(targetId) ||
-          (w.wallet as any).id?.toLowerCase().includes(targetId)
-        );
-        if (fuzzy) return fuzzy;
-      } else if (wallets.length > 0) {
-        return wallets[0]!;
-      }
+      const found = targetId
+        ? wallets.find(w => w.id.toLowerCase() === targetId || w.id.toLowerCase().includes(targetId))
+        : wallets[0];
 
-      if (attempt < this.opts.maxRetries) {
-        await new Promise((r) => setTimeout(r, this.opts.retryDelayMs));
-      }
+      if (found) return found;
+      if (attempt < this.opts.maxRetries) await new Promise((r) => setTimeout(r, this.opts.retryDelayMs));
     }
-
-    throw new ProviderNotFoundError(
-      this.opts.providerKey ? `Wallet "${this.opts.providerKey}"` : 'Any Midnight wallet',
-      this.opts.maxRetries,
-    );
+    throw new ProviderNotFoundError(targetId || 'Any Midnight wallet', this.opts.maxRetries);
   }
 
-  // ── Connection ─────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   protected async onConnect(): Promise<void> {
-    const timeoutController = new AbortController();
-    const timeout = setTimeout(() => {
-      timeoutController.abort();
-    }, this.opts.connectTimeoutMs);
+    if (!isBrowser) throw new Error('InjectedWalletAdapter cannot connect on the server.');
 
+    const timeout = setTimeout(() => { }, this.opts.connectTimeoutMs);
     try {
-      const walletEntry = await this.waitForFoundWallet();
-      const wallet = walletEntry.wallet;
-      const actualId = walletEntry.id;
-
+      const { id, wallet } = await this.waitForFoundWallet();
       const connector = wallet.enable || wallet.connect;
-      if (!connector) throw new ConnectionRejectedError(`Wallet "${actualId}" has no connection method.`);
+      if (!connector) throw new ConnectionRejectedError(`Wallet "${id}" has no connection method.`);
 
-      // Try preprod first, then fallback
       try {
         this.api = await connector.call(wallet, 'preprod');
-      } catch (err) {
-        console.warn(`[InjectedWalletAdapter] Preprod connection failed for "${actualId}", trying default.`, err);
+      } catch (err: any) {
+        // Feature: Detect if the session was revoked/expired during a reconnect attempt
+        const msg = (err?.message || String(err)).toLowerCase();
+        if (msg.includes('revoked') || msg.includes('expired') || msg.includes('unauthorized')) {
+          throw new SessionExpiredError(id);
+        }
         this.api = await connector.call(wallet);
       }
 
-      if (!this.api) throw new ConnectionRejectedError(`Wallet "${actualId}" returned no API.`);
+      if (!this.api) throw new ConnectionRejectedError(`Wallet "${id}" returned no API.`);
 
-      console.log(`[InjectedWalletAdapter] Connected to "${actualId}", API keys:`, Object.keys(this.api));
+      this.detectCapabilities();
 
       let address = '';
       let coinPublicKey: string | null = null;
       let encryptionPublicKey: string | null = null;
-      let serviceUris: ServiceUriConfig = {
-        proofServerUri: '',
-        indexerUri: '',
-        nodeUri: '',
-        networkId: '',
-      };
+      let serviceUris: ServiceUriConfig | null = null;
 
-      // 1. Try Standard Standard API (state / serviceUriConfig)
       if (typeof this.api.state === 'function') {
-        const [state, uris] = await Promise.all([
-          this.api.state(),
-          typeof this.api.serviceUriConfig === 'function' ? this.api.serviceUriConfig() : Promise.resolve(undefined),
-        ]);
-        
+        const state = await this.api.state();
         address = state.address;
         coinPublicKey = state.coinPublicKey ?? null;
         encryptionPublicKey = state.encryptionPublicKey ?? null;
-        if (uris) serviceUris = uris;
-      } 
-      // 2. Try Older/Alternative API
-      else if (typeof (this.api as any).getUnshieldedAddress === 'function') {
-        const [rawAddr, config] = await Promise.all([
-          (this.api as any).getUnshieldedAddress(),
-          (this.api as any).getConfiguration ? (this.api as any).getConfiguration() : Promise.resolve({}),
-        ]);
-        
+        if (typeof this.api.serviceUriConfig === 'function') {
+          serviceUris = await this.api.serviceUriConfig();
+        }
+      } else if (typeof (this.api as any).getUnshieldedAddress === 'function') {
+        const rawAddr = await (this.api as any).getUnshieldedAddress();
         address = this.normalizeAddress(rawAddr);
-        serviceUris = {
-          proofServerUri: config.proofServerUri || config.proverServerUri || '',
-          indexerUri: config.indexerUri || config.indexServerUri || '',
-          nodeUri: config.nodeUri || config.nodeServerUri || '',
-          networkId: config.networkId || '',
-        };
-      } else {
-        throw new ConnectionRejectedError(`Wallet "${actualId}" has no recognized state or address methods.`);
+        if (typeof (this.api as any).getConfiguration === 'function') {
+          const config = await (this.api as any).getConfiguration();
+          serviceUris = {
+            proofServerUri: config.proofServerUri || config.proverServerUri || '',
+            indexerUri: config.indexerUri || config.indexServerUri || '',
+            nodeUri: config.nodeUri || config.nodeServerUri || '',
+            networkId: config.networkId || '',
+          };
+        }
       }
 
-      this.setWalletDetails({
-        address,
-        coinPublicKey,
-        encryptionPublicKey,
-        serviceUris,
-      });
-
+      this.setWalletDetails({ address, coinPublicKey, encryptionPublicKey, serviceUris });
     } catch (err) {
       this.api = null;
-      throw wrapError(err, 'Failed to connect injected wallet.');
+      throw err;
     } finally {
       clearTimeout(timeout);
     }
   }
 
   protected override async onDisconnect(): Promise<void> {
-    if (this.api?.disconnect) {
-      try {
-        await this.api.disconnect();
-      } catch (err) {
-        console.warn(`[InjectedWalletAdapter] Disconnect error:`, err);
-      }
-    }
+    if (this.api?.disconnect) await this.api.disconnect().catch(() => { });
     this.api = null;
+    this.mode = 'unknown';
+  }
+
+  // ── Capabilities ──────────────────────────────────────────────────────────
+
+  private detectCapabilities(): void {
+    if (!this.api) return;
+    const hasRpc = typeof this.api.request === 'function';
+    const hasDirectSign = ['signIntent', 'signData'].some(m => typeof (this.api as any)[m] === 'function');
+    const hasTxFlow = typeof this.api.balanceUnsealedTransaction === 'function';
+
+    if (hasRpc || hasDirectSign) this.mode = 'intent-signing';
+    else if (hasTxFlow) this.mode = 'tx-only';
+    else this.mode = 'unknown';
   }
 
   async signIntent(intent: MidnightIntent): Promise<SignedIntent> {
-    if (!this.isConnected() || !this.api) throw new SigningError('Not connected.');
+    if (!this.api) throw new SigningError('Not connected.');
+    if (this.mode === 'tx-only') throw new SigningError('Wallet only supports direct transaction flows.');
 
-    try {
-      if (this.api.request) {
-        const result = await this.api.request({
-          method: 'midnight_signIntent',
-          params: { intent },
-        }) as { signature: string; publicKey: string };
+    const jsonIntent = JSON.parse(JSON.stringify(intent));
+    let result: any = null;
 
-        return {
-          intent,
-          signature: result.signature,
-          publicKey: result.publicKey,
-          timestamp: Date.now(),
-        };
+    const stringified = JSON.stringify(jsonIntent);
+    const paramsOptions = [
+      [stringified, { encoding: 'text' }],
+      { data: stringified, encoding: 'text' },
+      [{ data: stringified, encoding: 'text' }],
+      [jsonIntent],
+      jsonIntent,
+      { intent: jsonIntent }
+    ];
+
+    if (this.api.request) {
+      const methods = ['midnight_signIntent', 'midnight_signData', 'signIntent', 'signData'];
+      for (const method of methods) {
+        for (const params of paramsOptions) {
+          result = await this.safeRequest(method, params);
+          if (result) break;
+        }
+        if (result) break;
       }
-      throw new SigningError('Method signIntent not supported by provider.');
-    } catch (err) {
-      throw wrapError(err, 'Signing failed.');
     }
+
+    if (!result) {
+      const direct = ['signIntent', 'signData'];
+      for (const m of direct) {
+        const fn = (this.api as any)[m];
+        if (typeof fn === 'function') {
+          for (const params of paramsOptions) {
+            try {
+              // Handle positional vs object for .call()
+              result = Array.isArray(params)
+                ? await fn.apply(this.api, params)
+                : await fn.call(this.api, params);
+              if (result) break;
+            } catch { }
+          }
+        }
+        if (result) break;
+      }
+    }
+
+    if (!result) throw new SigningError('No compatible signing method found.');
+
+    // Normalization
+    let signature = result.signature || result.sig || (typeof result === 'string' ? result : undefined);
+    let publicKey = result.publicKey || result.pk || result.verifyingKey || this.getCoinPublicKey();
+
+    if (!signature || !publicKey) throw new SigningError('Invalid signing result shape.');
+
+    return { intent, signature, publicKey, timestamp: result.timestamp || Date.now() };
+  }
+
+  async executeTransactionFlow(unsealed: UnsealedTransaction): Promise<SubmitTransactionResult> {
+    const sealed = await this.balanceTransaction(unsealed);
+    return await this.submitTransaction(sealed);
   }
 
   async balanceTransaction(unsealed: UnsealedTransaction): Promise<SealedTransaction> {
-    if (!this.isConnected() || !this.api) throw new Error('Not connected.');
-    try {
-      return await this.api.balanceUnsealedTransaction(unsealed);
-    } catch (err) {
-      throw wrapError(err, 'Balancing failed.');
-    }
+    if (!this.api) throw new Error('Not connected.');
+    return await this.api.balanceUnsealedTransaction(unsealed);
   }
 
   async submitTransaction(sealed: SealedTransaction): Promise<SubmitTransactionResult> {
-    if (!this.isConnected() || !this.api) throw new Error('Not connected.');
-    try {
-      const res = await this.api.submitTransaction(sealed) as any;
-      return res.txId || res.hash || res;
-    } catch (err) {
-      throw wrapError(err, 'Submission failed.');
-    }
+    if (!this.api) throw new Error('Not connected.');
+    const res = await this.api.submitTransaction(sealed) as any;
+    return res.txId || res.hash || res;
+  }
+
+  getCapabilities() {
+    return { mode: this.mode, canSignIntent: this.mode === 'intent-signing', canSubmitTx: true };
   }
 }

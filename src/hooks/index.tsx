@@ -18,6 +18,8 @@ import type {
 } from '../validation/schemas.js';
 import { IntentBuilder, type IntentParams } from '../builder/intent.js';
 import type { ConnectionState } from '../core/types.js';
+import type { SignedMessage } from '../utils/verify.js';
+import { isBrowser } from '../utils/env.js';
 
 /**
  * State of the currently active wallet.
@@ -59,6 +61,7 @@ interface WalletContextValue {
   connect: (name: string) => Promise<void>;
   disconnect: () => Promise<void>;
   signIntent: (intent: MidnightIntent) => Promise<SignedIntent>;
+  signMessage: (message: string) => Promise<SignedMessage>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -70,28 +73,37 @@ interface WalletProviderProps {
   manager: WalletManager;
   /** If provided, auto-connect with fallback on mount */
   autoConnect?: string[];
+  /** If true, invokes autoRestore from localStorage once on client mount */
+  autoRestore?: boolean;
 }
 
+/** 
+ * WalletProvider — Global context for Midnight wallet integration. 
+ * SSR-safe: returns empty/not-connected defaults on the server.
+ */
 export const WalletProvider: React.FC<WalletProviderProps> = ({
   children,
   manager,
   autoConnect,
+  autoRestore = true,
 }) => {
-  const [wallet, setWallet] = useState<MidnightWallet | null>(manager.tryGetActiveWallet());
-  const [connectionState, setConnectionState] = useState<ConnectionState>(manager.getConnectionState());
+  // 1. Initial State: Always start as 'idle'/'null' for hydration safety
+  const [wallet, setWallet] = useState<MidnightWallet | null>(null);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [error, setError] = useState<Error | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [coinPublicKey, setCoinPublicKey] = useState<string | null>(null);
   const [encryptionPublicKey, setEncryptionPublicKey] = useState<string | null>(null);
   const [serviceUris, setServiceUris] = useState<ServiceUriConfig | null>(null);
 
-  // Stable ref for the manager so event handlers don't re-register
-  const managerRef = useRef(manager);
-  managerRef.current = manager;
+  // Persistence management
+  const [hasRestored, setHasRestored] = useState(false);
 
   // Sync state with manager events
   useEffect(() => {
-    const mgr = managerRef.current;
+    // Sync initial state once on client mount to match manager's internal state
+    setWallet(manager.tryGetActiveWallet());
+    setConnectionState(manager.getConnectionState());
 
     const handleConnect = (w: MidnightWallet) => {
       setWallet(w);
@@ -119,50 +131,46 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 
     const handleStateChange = (state: ConnectionState) => {
       setConnectionState(state);
+      if (state === 'connecting' || state === 'restoring' || state === 'connected') {
+        setError(null);
+      }
     };
+    const handleError = (err: Error) => setError(err);
 
-    const handleError = (err: Error) => {
-      setError(err);
-    };
-
-    mgr.on('onConnect', handleConnect);
-    mgr.on('onDisconnect', handleDisconnect);
-    mgr.on('onStateChange', handleStateChange);
-    mgr.on('onError', handleError);
+    manager.on('onConnect', handleConnect);
+    manager.on('onDisconnect', handleDisconnect);
+    manager.on('onStateChange', handleStateChange);
+    manager.on('onError', handleError);
 
     return () => {
-      mgr.off('onConnect', handleConnect);
-      mgr.off('onDisconnect', handleDisconnect);
-      mgr.off('onStateChange', handleStateChange);
-      mgr.off('onError', handleError);
+      manager.off('onConnect', handleConnect);
+      manager.off('onDisconnect', handleDisconnect);
+      manager.off('onStateChange', handleStateChange);
+      manager.off('onError', handleError);
     };
   }, [manager]);
 
-  // Auto-connect on mount
+  // Client-only initialization logic
   useEffect(() => {
-    if (autoConnect && autoConnect.length > 0 && !managerRef.current.isConnected()) {
-      void managerRef.current.connectWithFallback(autoConnect).catch((err) => {
-        console.warn('[WalletProvider] Auto-connect failed:', err);
-      });
-    }
-  }, [autoConnect]);
+    const init = async () => {
+      if (autoRestore && !hasRestored && !manager.isConnected()) {
+        setHasRestored(true);
+        await manager.autoRestore();
+      }
+      
+      if (!manager.isConnected() && autoConnect && autoConnect.length > 0) {
+        void manager.connectWithFallback(autoConnect).catch(() => {});
+      }
+    };
+    init();
+  }, [autoConnect, autoRestore, manager, hasRestored]);
 
-  const connect = useCallback(async (name: string) => {
-    setError(null);
-    await managerRef.current.connect(name);
-  }, []);
+  const connect = useCallback((name: string) => manager.connect(name), [manager]);
+  const disconnect = useCallback(() => manager.disconnect(), [manager]);
+  const signIntent = useCallback((intent: MidnightIntent) => manager.signIntent(intent), [manager]);
+  const signMessage = useCallback((message: string) => manager.signMessage(message), [manager]);
 
-  const disconnect = useCallback(async () => {
-    setError(null);
-    await managerRef.current.disconnect();
-  }, []);
-
-  const signIntent = useCallback(async (intent: MidnightIntent): Promise<SignedIntent> => {
-    const w = managerRef.current.getActiveWallet();
-    return w.signIntent(intent);
-  }, []);
-
-  const value = useMemo<WalletContextValue>(() => ({
+  const contextValue = useMemo<WalletContextValue>(() => ({
     manager,
     wallet,
     address,
@@ -174,28 +182,21 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
     connect,
     disconnect,
     signIntent,
-  }), [manager, wallet, address, coinPublicKey, encryptionPublicKey, serviceUris, connectionState, error, connect, disconnect, signIntent]);
+    signMessage,
+  }), [manager, wallet, address, coinPublicKey, encryptionPublicKey, serviceUris, connectionState, error, connect, disconnect, signIntent, signMessage]);
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
 };
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
 function useWalletContext(): WalletContextValue {
   const ctx = useContext(WalletContext);
-  if (!ctx) {
-    throw new Error(
-      'useWallet/useConnect/useIntent must be used inside a <WalletProvider>. '
-      + 'Wrap your component tree with <WalletProvider manager={...}>.',
-    );
-  }
+  if (!ctx) throw new Error('useWallet hooks must be used inside a <WalletProvider>.');
   return ctx;
 }
 
-/**
- * Primary hook — returns everything about the current wallet state.
- */
-export function useWallet() {
+export function useWallet(): WalletState {
   const ctx = useWalletContext();
   return {
     wallet: ctx.wallet,
@@ -207,12 +208,10 @@ export function useWallet() {
     isConnected: ctx.connectionState === 'connected' && ctx.wallet !== null,
     error: ctx.error,
     manager: ctx.manager,
+    adapters: ctx.manager.getRegisteredWallets().map(w => ({ name: w.name })),
   };
 }
 
-/**
- * Connection-focused hook with loading and error state.
- */
 export function useConnect() {
   const ctx = useWalletContext();
   const [isLoading, setIsLoading] = useState(false);
@@ -221,28 +220,16 @@ export function useConnect() {
   const connect = useCallback(async (name: string) => {
     setIsLoading(true);
     setConnectError(null);
-    try {
-      await ctx.connect(name);
-    } catch (err) {
+    try { await ctx.connect(name); } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       setConnectError(error);
-      throw error; // re-throw so caller can handle too
-    } finally {
-      setIsLoading(false);
-    }
+      throw error;
+    } finally { setIsLoading(false); }
   }, [ctx]);
 
   const disconnect = useCallback(async () => {
     setIsLoading(true);
-    setConnectError(null);
-    try {
-      await ctx.disconnect();
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setConnectError(error);
-    } finally {
-      setIsLoading(false);
-    }
+    try { await ctx.disconnect(); } finally { setIsLoading(false); }
   }, [ctx]);
 
   return {
@@ -250,63 +237,36 @@ export function useConnect() {
     disconnect,
     isLoading,
     error: connectError,
+    adapters: ctx.manager.getRegisteredWallets().map(w => ({ name: w.name })),
     connectionState: ctx.connectionState,
-    wallet: ctx.wallet,
-    adapters: ctx.manager.getRegisteredWallets(),
   };
 }
 
-/**
- * Intent hook — build + sign in one call, or build and sign separately.
- */
 export function useIntent() {
   const ctx = useWalletContext();
   const [isLoading, setIsLoading] = useState(false);
   const [intentError, setIntentError] = useState<Error | null>(null);
 
-  /**
-   * Build from IntentParams and sign in one shot.
-   */
   const buildAndSign = useCallback(async (params: IntentParams): Promise<SignedIntent> => {
-    setIsLoading(true);
-    setIntentError(null);
+    setIsLoading(true); setIntentError(null);
     try {
       const intent = IntentBuilder.create(params);
-      const signed = await ctx.signIntent(intent);
-      return signed;
+      return await ctx.signIntent(intent);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      setIntentError(error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
+      setIntentError(error); throw error;
+    } finally { setIsLoading(false); }
   }, [ctx]);
 
-  /**
-   * Sign a pre-built MidnightIntent.
-   */
-  const sign = useCallback(async (intent: MidnightIntent): Promise<SignedIntent> => {
-    setIsLoading(true);
-    setIntentError(null);
+  const signMessage = useCallback(async (message: string): Promise<SignedMessage> => {
+    setIsLoading(true); setIntentError(null);
     try {
-      const signed = await ctx.signIntent(intent);
-      return signed;
+      return await ctx.signMessage(message);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      setIntentError(error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
+      setIntentError(error); throw error;
+    } finally { setIsLoading(false); }
   }, [ctx]);
 
-  return {
-    buildAndSign,
-    sign,
-    build: IntentBuilder.create,
-    isLoading,
-    error: intentError,
-    isConnected: ctx.wallet !== null,
-  };
+  return { buildAndSign, signMessage, isLoading, error: intentError };
 }

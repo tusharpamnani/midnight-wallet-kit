@@ -1,254 +1,122 @@
-# midnight-wallet-kit
+# 🌌 midnight-wallet-kit
 
-Production-grade wallet adapter system for the **Midnight Network**.
+Production-grade wallet integration kit for the **Midnight Network**.
 
-Built to eliminate the developer pain of fragile injected providers, undefined crashes, and inconsistent signing flows.
+Built to eliminate the friction of fragile injected providers, inconsistent signing flows, and complex ZK-transaction state management. Midnight Wallet Kit provides a resilient, type-safe abstraction for DApp developers to interact with browser extensions (Lace, 1AM) and hardware wallets.
 
-## Install
+---
+
+## 🚀 Key Features
+
+- **🛡️ Resilient Probing**: Exhaustively searches for working RPC methods across different provider standards with deep payload fallbacks.
+- **🔄 Session Persistence**: Built-in `autoRestore` support to keep users connected across page refreshes.
+- **🏗️ Safe Intent Builder**: Automatic sanitization and Zod-backed validation for contract intents.
+- **⚛️ First-Class React Support**: Intuition-led hooks (`useWallet`, `useConnect`, `useIntent`, `useBalance`) with SSR/Hydration safety.
+
+## 📦 Install
 
 ```bash
 npm install midnight-wallet-kit
 ```
 
-## Quick Start
+## ⚡ Quick Start
+
+### 1. Initialize the Manager
 
 ```ts
-import {
-  WalletManager,
-  InjectedWalletAdapter,
-  SeedWalletAdapter,
-  MockWalletAdapter,
-  IntentBuilder,
-} from 'midnight-wallet-kit';
+import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
 
 const manager = new WalletManager();
 
-// Register adapters in order of preference
+// Register adapters (Registry is case-insensitive internally)
 manager
-  .register(new InjectedWalletAdapter())
-  .register(new SeedWalletAdapter('correct horse battery staple banana planet'))
-  .register(new MockWalletAdapter());
-
-// Connect with automatic fallback (Injected → Seed → Mock)
-await manager.connectWithFallback(['injected', 'seed', 'mock']);
-
-const wallet = manager.getActiveWallet();
-console.log(wallet.getAddress()); // 0x...
-
-// Build a safe, validated intent
-const intent = IntentBuilder.create({
-  contract: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD',
-  action: 'mint',
-  params: { tokenId: 42, recipient: wallet.getAddress() },
-});
-
-// Sign it
-const signed = await wallet.signIntent(intent);
+  .register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }))
+  .register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
 ```
 
-## Architecture
-
-```
-midnight-wallet-kit/
-├── src/
-│   ├── adapters/
-│   │   ├── base.ts          # Abstract base adapter (state machine, race-condition mutex)
-│   │   ├── injected.ts      # Browser extension adapter (retry, timeout, SSR-safe)
-│   │   ├── seed.ts          # Local seed phrase adapter (deterministic key derivation)
-│   │   └── mock.ts          # Test adapter (configurable delays & failures)
-│   ├── builder/
-│   │   └── intent.ts        # Safe intent builder (deep sanitization, Zod validation)
-│   ├── core/
-│   │   ├── manager.ts       # WalletManager (registry, fallback, events, mutex)
-│   │   └── types.ts         # Shared types
-│   ├── errors/
-│   │   └── wallet-errors.ts # Complete error hierarchy (10 typed errors)
-│   ├── hooks/
-│   │   └── index.tsx         # React hooks (useWallet, useConnect, useIntent)
-│   ├── validation/
-│   │   └── schemas.ts       # Zod schemas + MidnightWallet interface
-│   └── index.ts             # Public API
-├── examples/
-│   └── basic-usage.ts       # Runnable demo
-└── src/index.test.ts        # 39 tests
-```
-
-## Wallet Adapters
-
-### `InjectedWalletAdapter`
-
-Connects to browser extensions that inject a provider at `window.midnight`.
-
-```ts
-new InjectedWalletAdapter({
-  maxRetries: 5,         // retry count while waiting for injection
-  retryDelayMs: 400,     // base delay (uses 1.5x backoff)
-  connectTimeoutMs: 10000, // hard timeout for the entire flow
-  providerKey: 'midnight', // window property name
-});
-```
-
-**Defenses**: SSR guard, exponential backoff, AbortController timeout, provider shape validation.
-
-### `SeedWalletAdapter`
-
-Derives a deterministic keypair from a seed phrase. The seed never leaves the process.
-
-```ts
-const seed = new SeedWalletAdapter('your twelve word phrase here ...');
-await seed.connect(); // derives keys locally
-```
-
-**Defenses**: Seed validation (min 3 words), deterministic signing (same intent → same signature), keys zeroed on disconnect.
-
-### `MockWalletAdapter`
-
-For tests and development. Configurable delays and failure simulation.
-
-```ts
-const mock = new MockWalletAdapter({
-  connectDelayMs: 100,       // simulate slow connection
-  shouldFailConnect: false,  // toggle connection failure
-  shouldFailSign: false,     // toggle signing failure
-  address: '0xcustom',       // custom address
-});
-```
-
-Tracks all signed intents in `mock.signedIntents` for assertions.
-
-### Building Your Own Adapter
-
-Extend `BaseWalletAdapter` and implement three methods:
-
-```ts
-class MyAdapter extends BaseWalletAdapter {
-  readonly name = 'MyWallet';
-
-  protected async onConnect(): Promise<void> {
-    // Your connection logic...
-    this.setAddress('0x...');  // MUST call this
-  }
-
-  async signIntent(intent: MidnightIntent): Promise<SignedIntent> {
-    // Your signing logic...
-    return { intent, signature: '...', publicKey: '...', timestamp: Date.now() };
-  }
-}
-```
-
-The base class handles: connection state machine, race-condition mutex, address validation, idempotent disconnect.
-
-## IntentBuilder
-
-The safety layer between your code and the blockchain.
-
-```ts
-const intent = IntentBuilder.create({
-  contract: '0xabc',
-  action: 'transfer',
-  params: {
-    amount: 100,
-    metadata: { nested: undefined }, // → sanitized to null
-  },
-});
-```
-
-**Guarantees**:
-- Deep sanitization (undefined → null, NaN → null, circular refs → `[circular]`)
-- Zod schema validation with detailed field-level error messages
-- Monotonically increasing nonces (no duplicates even in the same ms)
-- No `.toString()` of undefined — ever
-
-## WalletManager
-
-Central orchestrator with event system:
-
-```ts
-const manager = new WalletManager();
-
-manager.on('onConnect', (wallet) => console.log(wallet.name));
-manager.on('onDisconnect', (name) => console.log(name));
-manager.on('onError', (error) => console.error(error));
-manager.on('onStateChange', (state) => console.log(state));
-
-// State machine: idle → connecting → connected → disconnecting → disconnected
-```
-
-**Defenses**: Operation mutex (no concurrent connect/disconnect races), auto-disconnect previous wallet, `FallbackExhaustedError` with per-adapter error details.
-
-## React Integration
+### 2. React Provider Setup
 
 ```tsx
-import { WalletProvider, useWallet, useConnect, useIntent } from 'midnight-wallet-kit';
+import { WalletProvider } from 'midnight-wallet-kit/react';
 
-function App() {
+function App({ children }) {
   return (
-    <WalletProvider
-      manager={manager}
-      autoConnect={['injected', 'seed']}  // auto-connect on mount
+    <WalletProvider 
+      manager={manager} 
+      // prioritization order for mount-time connection fallback
+      autoConnect={['1AM', 'Lace']} 
+      // automatically reconnect the last-used wallet
+      autoRestore={true}
     >
-      <WalletUI />
+      {children}
     </WalletProvider>
   );
 }
+```
 
-function WalletUI() {
-  const { address, isConnected } = useWallet();
-  const { connect, disconnect, isLoading, error } = useConnect();
-  const { buildAndSign } = useIntent();
+### 3. Basic Usage (Hooks)
 
-  if (isLoading) return <p>Connecting...</p>;
-  if (error) return <p>Error: {error.message}</p>;
+```tsx
+import { useWallet, useConnect, useIntent, useBalance } from 'midnight-wallet-kit/react';
+
+export function WalletProfile() {
+  const { address, isConnected, connectionState } = useWallet();
+  const { connect, disconnect } = useConnect();
+  const { balance } = useBalance();
 
   if (!isConnected) {
-    return <button onClick={() => connect('injected')}>Connect</button>;
+    return <button onClick={() => connect('1AM')}>Connect 1AM Wallet</button>;
   }
 
   return (
-    <div>
-      <p>Connected: {address}</p>
-      <button onClick={async () => {
-        const signed = await buildAndSign({
-          contract: '0x...',
-          action: 'mint',
-          params: { tokenId: 1 },
-        });
-        console.log(signed);
-      }}>
-        Mint NFT
-      </button>
-      <button onClick={disconnect}>Disconnect</button>
+    <div className="profile">
+      <p>Address: <code>{address}</code></p>
+      <p>Balance: {balance?.tDUST?.toString() || '0'} tDUST</p>
+      <button onClick={disconnect}>Disconnect Account</button>
     </div>
   );
 }
 ```
 
-## Error Handling
+## 📖 Advanced Usage
 
-Every error is a typed `MidnightWalletError` with a machine-readable `code`:
+### 📝 Resilient Data Signing
+The kit provides a high-level `signMessage` hook which automatically handles the complex multi-step probing for data-signing, adds proper prefixes, and generates unique timestamps.
 
-| Error Class | Code | When |
-|---|---|---|
-| `WalletNotConnectedError` | `WALLET_NOT_CONNECTED` | Calling methods before `connect()` |
-| `ProviderNotFoundError` | `PROVIDER_NOT_FOUND` | Browser extension not installed |
-| `ConnectionRejectedError` | `CONNECTION_REJECTED` | User rejected the connection |
-| `ConnectionTimeoutError` | `CONNECTION_TIMEOUT` | Connect timed out |
-| `InvalidIntentError` | `INVALID_INTENT` | IntentBuilder validation failed |
-| `SigningError` | `SIGNING_FAILED` | Signing operation failed |
-| `WalletAlreadyConnectedError` | `WALLET_ALREADY_CONNECTED` | Calling `connect()` twice |
-| `WalletNotRegisteredError` | `WALLET_NOT_REGISTERED` | Unknown adapter name |
-| `FallbackExhaustedError` | `FALLBACK_EXHAUSTED` | All fallback adapters failed |
-| `InvalidSeedError` | `INVALID_SEED` | Bad seed phrase |
+```tsx
+const { signMessage } = useIntent();
 
-All errors implement `toJSON()` for structured logging and carry an `Error.cause` chain.
-
-## Testing
-
-```bash
-npm test        # run once
-npm run test:watch  # watch mode
+const handleLogin = async () => {
+  // Timestamping and normalization happen automatically in the kit
+  const signed = await signMessage("Login to My DApp");
+  console.log("Public Key:", signed.publicKey);
+  console.log("Verified Signature:", signed.signature);
+};
 ```
 
-## License
+### 🔌 Intercepting with Middleware
+```ts
+manager.use(async (ctx, next) => {
+  console.log(`📡 Starting ${ctx.operation} on ${ctx.adapterName}`);
+  await next();
+  if (ctx.error) console.error('❌ Operation Failed:', ctx.error);
+});
+```
 
-MIT
+### 🧪 Simplified Unit Testing
+```ts
+import { MockWalletAdapter } from 'midnight-wallet-kit/testing';
+
+const adapter = new MockWalletAdapter({ 
+  name: 'TestWallet',
+  address: 'mn_addr1...',
+  signatureOverride: '0xmocksignature...',
+  shouldRejectSign: false 
+});
+```
+
+## 📚 Full API Reference
+For a complete breakdown of every interface, error code, and adapter configuration, please see the **[Technical Documentation](./DOCS.md)**.
+
+---
+MIT © 2026 Midnight Network

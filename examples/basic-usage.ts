@@ -58,7 +58,7 @@ async function main() {
   console.log('\n── Building intent ──');
 
   const intent = IntentBuilder.create({
-    contract: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD',
+    contract: '0xe5ef84eb9e72532120f5530a13257b8d16ed9726333aa1af767dfbf2091e5fb0',
     action: 'mint',
     params: {
       tokenId: 42,
