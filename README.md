@@ -1,17 +1,34 @@
-# 🌌 midnight-wallet-kit
+# Midnight Wallet Kit
 
-Production-grade wallet integration kit for the **Midnight Network**.
+Production-grade wallet integration kit for the **Midnight Network**. Supports ALL major wallets in the Midnight ecosystem with a unified, type-safe API.
 
-Built to eliminate the friction of fragile injected providers, inconsistent signing flows, and complex ZK-transaction state management. Midnight Wallet Kit provides a resilient, type-safe abstraction for DApp developers to interact with browser extensions (Lace, 1AM) and hardware wallets.
+---
+
+## 🎯 Supported Wallets
+
+| Wallet | Type | Dust-Free | Shielded Balances | Networks | Install |
+|--------|------|-----------|-------------------|----------|--------|
+| **1AM** | Midnight-Native | ✅ | ✅ | preview, preprod, mainnet | [Chrome](https://chromewebstore.google.com/detail/1am/bphnkdkcnfhompoegfpgnkidcjfbojjp) |
+| **Nocturne** | Midnight-Native | ❌ | ✅ | preview, preprod, mainnet | [GitHub](https://github.com/midnightntwrk/midnight-awesome-dapps) |
+| **NuFi** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://nufi.app) |
+| **GeroWallet** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://gerowallet.io) |
+| **VESPR** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://vespr.io) |
+| **Yoroi** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://yoroi-wallet.com) |
+| **Ctrl** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://ctrl.xyz) |
+| **SubWallet** | CIP-30 | ❌ | ❌ | preview, preprod, mainnet | [Website](https://subwallet.app) |
 
 ---
 
 ## 🚀 Key Features
 
-- **🛡️ Resilient Probing**: Exhaustively searches for working RPC methods across different provider standards with deep payload fallbacks.
-- **🔄 Session Persistence**: Built-in `autoRestore` support to keep users connected across page refreshes.
-- **🏗️ Safe Intent Builder**: Automatic sanitization and Zod-backed validation for contract intents.
-- **⚛️ First-Class React Support**: Intuition-led hooks (`useWallet`, `useConnect`, `useIntent`, `useBalance`) with SSR/Hydration safety.
+- **🛡️ Resilient Probing**: Exhaustively searches for working RPC methods across different provider standards
+- **🔐 Dust-Free Execution**: 1AM wallet + ProofStation sponsors all fees (zero dust needed)
+- **🏗️ Safe Intent Builder**: Automatic sanitization and Zod-backed validation
+- **⚛️ First-Class React Support**: Hooks (`useWallet`, `useConnect`, `useIntent`, `useBalance`)
+- **📋 Wallet Registry**: Pre-configured registry of all 8 supported wallets
+- **🧪 Simplified Unit Testing**: Mock adapter included
+
+---
 
 ## 📦 Install
 
@@ -19,104 +36,144 @@ Built to eliminate the friction of fragile injected providers, inconsistent sign
 npm install midnight-wallet-kit
 ```
 
-## ⚡ Quick Start
+---
 
-### 1. Initialize the Manager
+## ⚡ Quick Start (Easiest Way)
 
-```ts
-import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
+```typescript
+import { createMidnightWalletManager } from 'midnight-wallet-kit';
 
-const manager = new WalletManager();
+// Creates a manager with ALL 8 wallets pre-registered
+const manager = createMidnightWalletManager({
+  network: 'preprod', // default network for Midnight-native wallets
+});
 
-// Register adapters (Registry is case-insensitive internally)
-manager
-  .register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }))
-  .register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
+// Connect to the first available wallet (tries 1AM → Nocturne → NuFi → ...)
+await manager.connectWithFallback([
+  '1AM',        // Dust-free, best UX
+  'Nocturne',   // Midnight-native
+  'NuFi',       // Popular multi-chain
+  'GeroWallet',
+  'VESPR',
+  'Yoroi',
+  'Ctrl',
+  'SubWallet',
+]);
 ```
 
-### 2. React Provider Setup
+---
+
+## 🔧 Advanced: Select Specific Wallets
+
+```typescript
+import { createMidnightWalletManager } from 'midnight-wallet-kit';
+
+// Only register specific wallets
+const manager = createMidnightWalletManager({
+  only: ['1AM', 'NuFi', 'Nocturne'],
+});
+
+// Or skip specific wallets
+const manager = createMidnightWalletManager({
+  skip: ['SubWallet', 'Ctrl'],
+});
+```
+
+---
+
+## ⚛️ React Integration
 
 ```tsx
-import { WalletProvider } from 'midnight-wallet-kit/react';
+import { WalletProvider, useWallet, useConnect, useBalance } from 'midnight-wallet-kit';
 
-function App({ children }) {
+function App() {
   return (
-    <WalletProvider 
-      manager={manager} 
-      // prioritization order for mount-time connection fallback
-      autoConnect={['1AM', 'Lace']} 
-      // automatically reconnect the last-used wallet
-      autoRestore={true}
-    >
-      {children}
+    <WalletProvider manager={manager} autoRestore={true}>
+      <YourApp />
     </WalletProvider>
   );
 }
-```
 
-### 3. Basic Usage (Hooks)
-
-```tsx
-import { useWallet, useConnect, useIntent, useBalance } from 'midnight-wallet-kit/react';
-
-export function WalletProfile() {
-  const { address, isConnected, connectionState } = useWallet();
+function YourApp() {
+  const { address, isConnected } = useWallet();
   const { connect, disconnect } = useConnect();
   const { balance } = useBalance();
 
   if (!isConnected) {
-    return <button onClick={() => connect('1AM')}>Connect 1AM Wallet</button>;
+    return <button onClick={() => connect('1AM')}>Connect 1AM</button>;
   }
 
   return (
-    <div className="profile">
-      <p>Address: <code>{address}</code></p>
+    <div>
+      <p>Address: {address}</p>
       <p>Balance: {balance?.tDUST?.toString() || '0'} tDUST</p>
-      <button onClick={disconnect}>Disconnect Account</button>
+      <button onClick={disconnect}>Disconnect</button>
     </div>
   );
 }
 ```
 
-## 📖 Advanced Usage
+---
 
-### 📝 Resilient Data Signing
-The kit provides a high-level `signMessage` hook which automatically handles the complex multi-step probing for data-signing, adds proper prefixes, and generates unique timestamps.
+## 🏗️ 1AM-Specific: Dust-Free Contract Deployment
 
-```tsx
-const { signMessage } = useIntent();
+```typescript
+import { OneAMWalletAdapter, buildOneAMProviders, deployContract } from 'midnight-wallet-kit';
 
-const handleLogin = async () => {
-  // Timestamping and normalization happen automatically in the kit
-  const signed = await signMessage("Login to My DApp");
-  console.log("Public Key:", signed.publicKey);
-  console.log("Verified Signature:", signed.signature);
-};
-```
+// Connect to 1AM (dust-free execution)
+await manager.connect('1AM');
+const adapter = manager.getActiveWallet() as OneAMWalletAdapter;
 
-### 🔌 Intercepting with Middleware
-```ts
-manager.use(async (ctx, next) => {
-  console.log(`📡 Starting ${ctx.operation} on ${ctx.adapterName}`);
-  await next();
-  if (ctx.error) console.error('❌ Operation Failed:', ctx.error);
+// Build providers (ProofStation sponsors fees)
+const providers = await buildOneAMProviders(adapter, {
+  zkConfigBaseUrl: 'https://your-app.com/contract/compiled/your-contract',
 });
-```
 
-### 🧪 Simplified Unit Testing
-```ts
-import { MockWalletAdapter } from 'midnight-wallet-kit/testing';
-
-const adapter = new MockWalletAdapter({ 
-  name: 'TestWallet',
-  address: 'mn_addr1...',
-  signatureOverride: '0xmocksignature...',
-  shouldRejectSign: false 
+// Deploy contract (zero dust needed!)
+const deployed = await deployContract(providers, {
+  compiledContract: yourCompiledContract,
 });
+console.log('Contract deployed:', deployed.contractAddress);
 ```
-
-## 📚 Full API Reference
-For a complete breakdown of every interface, error code, and adapter configuration, please see the **[Technical Documentation](./DOCS.md)**.
 
 ---
+
+## 📝 Available Adapters
+
+```typescript
+import {
+  OneAMWalletAdapter,      // 1AM - Dust-free
+  NocturneWalletAdapter,   // Nocturne - Midnight-native
+  NuFiWalletAdapter,        // NuFi
+  GeroWalletAdapter,        // GeroWallet
+  VesprWalletAdapter,       // VESPR
+  YoroiWalletAdapter,       // Yoroi
+  CtrlWalletAdapter,        // Ctrl
+  SubWalletAdapter,         // SubWallet
+  InjectedWalletAdapter,    // Generic CIP-30/Midnight
+  MockWalletAdapter,         // Testing
+} from 'midnight-wallet-kit';
+```
+
+---
+
+## 🧪 Testing
+
+```typescript
+import { MockWalletAdapter } from 'midnight-wallet-kit';
+
+const mockAdapter = new MockWalletAdapter({
+  name: 'TestWallet',
+  shouldFail: false,
+});
+```
+
+---
+
+## 📚 Full API Reference
+
+For complete documentation, see **[DOCS.md](./DOCS.md)**.
+
+---
+
 MIT © 2026 Tushar Pamnani
