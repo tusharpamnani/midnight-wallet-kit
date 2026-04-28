@@ -8,18 +8,18 @@ const codeTabs = [
     id: "install",
     label: "1. Install",
     code: `npm install midnight-wallet-kit`,
-    language: "bash"
+    language: "bash",
   },
   {
     id: "setup",
     label: "2. Setup",
-    code: `import { WalletManager, InjectedWalletAdapter } from 'midnight-wallet-kit';
+    code: `import { createMidnightWalletManager } from 'midnight-wallet-kit';
 import { WalletProvider } from 'midnight-wallet-kit/react';
 
-const manager = new WalletManager();
-manager
-  .register(new InjectedWalletAdapter({ name: 'Lace', providerKey: 'lace' }))
-  .register(new InjectedWalletAdapter({ name: '1AM', providerKey: 'midnight' }));
+// Creates a manager with ALL 8 wallets pre-registered
+const manager = createMidnightWalletManager({
+  network: 'preprod', // default network
+});
 
 function App({ children }) {
   return (
@@ -28,7 +28,7 @@ function App({ children }) {
     </WalletProvider>
   );
 }`,
-    language: "tsx"
+    language: "tsx",
   },
   {
     id: "use",
@@ -56,8 +56,27 @@ export function WalletProfile() {
     </div>
   );
 }`,
-    language: "tsx"
-  }
+    language: "tsx",
+  },
+  {
+    id: "advanced",
+    label: "4. Advanced",
+    code: `// Connect with fallback (tries wallets in order)
+await manager.connectWithFallback([
+  '1AM',        // Dust-free, best UX
+  'Nocturne',   // Midnight-native
+  'NuFi',       // Popular multi-chain
+  'GeroWallet',
+  'VESPR',
+  'Yoroi',
+  'Ctrl',
+  'SubWallet',
+]);
+
+// Or connect to a specific wallet
+await manager.connect('1AM');`,
+    language: "tsx",
+  },
 ];
 
 export function QuickStart() {
@@ -76,7 +95,7 @@ export function QuickStart() {
         <span className="section-label">QUICK START</span>
         <h2 className="mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">Integrate in minutes.</h2>
         <p className="mt-4 text-text-secondary text-center max-w-2xl">
-          Everything you need to get up and running with the Midnight Network. 
+          Everything you need to get up and running with the Midnight Network.
           Simply install, configure, and start using our first-class React hooks.
         </p>
       </div>
@@ -90,7 +109,7 @@ export function QuickStart() {
                 setActiveTab(tab);
                 setCopied(false);
               }}
-              className={`rounded-full px-6 py-2 text-xs font-bold uppercase transition-all ${
+              className={`rounded-full px-6 py-2 text-xs font-bold transition-all ${
                 activeTab.id === tab.id ? "bg-brand-violet text-white shadow-lg" : "text-text-secondary hover:text-white hover:bg-white/5"
               }`}
             >
@@ -120,14 +139,14 @@ export function QuickStart() {
               {copied ? "COPIED" : "COPY CODE"}
             </button>
           </div>
-          
+           
           <div className="p-8 overflow-auto max-h-[500px]">
             <pre className="font-mono text-sm leading-relaxed text-blue-300">
               <code className="text-white">
                 <span className="text-brand-violet font-bold opacity-30 select-none mr-4">1</span>
                 {activeTab.code.split('\n').map((line, i) => (
                   <div key={i} className="flex">
-                    <span className="text-white/20 font-mono text-[10px] w-6 mr-6 select-none border-r border-white/5">{i+1}</span>
+                    <span className="text-white/20 font-mono text-[10px] w-6 mr-6 select-none border-r border-white/5">{i + 1}</span>
                     <span className={i === 0 && activeTab.id === 'install' ? 'text-green-400' : ''}>{line}</span>
                   </div>
                 ))}

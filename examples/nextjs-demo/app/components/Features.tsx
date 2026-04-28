@@ -1,45 +1,51 @@
 "use client";
 
-import { 
-  Zap, 
-  RefreshCcw, 
-  ShieldCheck, 
-  Layers, 
-  GitMerge, 
-  AlertCircle 
+import {
+  Zap,
+  RefreshCcw,
+  ShieldCheck,
+  Layers,
+  GitMerge,
+  AlertCircle,
+  Wallet,
 } from "lucide-react";
 
 const features = [
   {
     icon: <Zap size={24} className="text-brand-violet" />,
-    title: "Resilient RPC Probing",
-    description: "Exhaustively tries 5+ signing formats across Lace and 1AM. Never fails silently."
+    title: "8 Wallets Supported",
+    description: "1AM, Nocturne, NuFi, Gero, VESPR, Yoroi, Ctrl, SubWallet — one kit for the entire Midnight ecosystem.",
+  },
+  {
+    icon: <Wallet size={24} className="text-brand-violet" />,
+    title: "Wallet Registry",
+    description: "createMidnightWalletManager() registers all 8 wallets instantly. One-line setup like RainbowKit.",
   },
   {
     icon: <RefreshCcw size={24} className="text-brand-violet" />,
     title: "Session Persistence",
-    description: "autoRestore() reconnects users across refreshes without any extra setup."
+    description: "autoRestore() reconnects users across refreshes without any extra setup.",
   },
   {
     icon: <ShieldCheck size={24} className="text-brand-violet" />,
     title: "Safe Intent Builder",
-    description: "Zod-validated, nonce-stamped, and sanitized intents. No malformed payloads."
+    description: "Zod-validated, nonce-stamped, and sanitized intents. No malformed payloads.",
   },
   {
     icon: <Layers size={24} className="text-brand-violet" />,
     title: "React Hooks",
-    description: "useWallet, useConnect, useIntent, useBalance — SSR-safe and hydration-friendly."
+    description: "useWallet, useConnect, useIntent, useBalance — SSR-safe and hydration-friendly.",
   },
   {
     icon: <GitMerge size={24} className="text-brand-violet" />,
     title: "Middleware System",
-    description: "Global interceptors for logging, analytics, and transaction guards."
+    description: "Global interceptors for logging, analytics, and transaction guards.",
   },
   {
     icon: <AlertCircle size={24} className="text-brand-violet" />,
     title: "Full Error Taxonomy",
-    description: "12 typed error classes. Every failure mode named, typed, and catchable."
-  }
+    description: "12 typed error classes. Every failure mode named, typed, and catchable.",
+  },
 ];
 
 export function Features() {

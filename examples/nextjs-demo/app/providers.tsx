@@ -1,43 +1,46 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-  WalletManager,
-  InjectedWalletAdapter,
-} from "midnight-wallet-kit";
 import { WalletProvider } from "midnight-wallet-kit/react";
+import { createMidnightWalletManager } from "midnight-wallet-kit";
 
 /**
  * Providers
  *
- * Exclusively registers Lace and 1AM wallet adapters.
- * InjectedWalletAdapter handles the Midnight-specific .enable() and balancing flow.
+ * Uses createMidnightWalletManager() to pre-register ALL 8 supported wallets:
+ * 1AM (dust-free), Nocturne, NuFi, GeroWallet, VESPR, Yoroi, Ctrl, SubWallet
  */
 export default function Providers({ children }: { children: React.ReactNode }) {
   const manager = useMemo(() => {
-    const mgr = new WalletManager();
-    
-    mgr
-      .register(
-        new InjectedWalletAdapter({
-          name: "1AM Wallet",
-          providerKey: "1am", // Confirmed from terminal logs
-        })
-      )
-      .register(
-        new InjectedWalletAdapter({
-          name: "Lace Wallet",
-          providerKey: "lace", // Reverting to 'lace', discovery will handle GUID matching if needed
-        })
-      );
-
-    return mgr;
+    // Creates a manager with ALL 8 wallets pre-registered
+    return createMidnightWalletManager({
+      network: 'preprod', // default network for Midnight-native wallets
+      // only: ['1AM', 'Nocturne', 'NuFi'], // optionally filter
+      // skip: ['SubWallet'], // optionally skip wallets
+    });
   }, []);
 
-  const autoConnect = useMemo(() => ["lace wallet", "1am wallet"], []);
+  // Priority order for auto-connect
+  const autoConnect = useMemo(
+    () => [
+      '1AM',        // Dust-free, best UX
+      'Nocturne',   // Midnight-native
+      'NuFi',       // Popular multi-chain
+      'GeroWallet',
+      'VESPR',
+      'Yoroi',
+      'Ctrl',
+      'SubWallet',
+    ],
+    [],
+  );
 
   return (
-    <WalletProvider manager={manager} autoConnect={autoConnect}>
+    <WalletProvider
+      manager={manager}
+      autoConnect={autoConnect}
+      autoRestore={true}
+    >
       {children as any}
     </WalletProvider>
   );

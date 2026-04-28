@@ -79,7 +79,7 @@ export function Hero() {
         style={{ color: "var(--color-text-muted)" }}
       >
         Resilient signing, ZK-native state management, and SSR-safe React
-        hooks. Stop wrestling with injected providers.
+        hooks. Supports 8 wallets: 1AM, Nocturne, NuFi, Gero, VESPR, Yoroi, Ctrl, SubWallet.
       </p>
 
       {/* CTAs */}
